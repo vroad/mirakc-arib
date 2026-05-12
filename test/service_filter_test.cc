@@ -17,6 +17,8 @@
 
 #include <cstdlib>
 #include <memory>
+#include <queue>
+#include <string>
 
 #include <fmt/format.h>
 #include <gmock/gmock.h>
@@ -73,6 +75,129 @@ TEST(ServiceFilterTest, NullPacket) {
   filter->Connect(std::move(sink));
   src.Connect(std::move(filter));
   EXPECT_EQ(EXIT_SUCCESS, src.FeedPackets());
+}
+
+// Verifies that ServiceFilter drops a NullPacket after processing tables
+// defined in the given XML.
+// Used as a helper function for NullPacketAfter* tests.
+void ExpectServiceFilterDropsNullPacketAfter(const std::string& xml) {
+  MockSource src;
+  auto filter = std::make_unique<ServiceFilter>(kOption);
+  auto sink = std::make_unique<MockSink>();
+
+  TableSource table_src;
+  table_src.LoadXml(xml);
+
+  // Note: TSDuck XML alone cannot represent NullPackets,
+  // so copy packets manually and append a NullPacket.
+  std::queue<ts::TSPacket> packets;
+  ts::TSPacket packet;
+  while (table_src.GetNextPacket(&packet)) {
+    packets.push(packet);
+  }
+  packets.push(ts::NullPacket);
+
+  EXPECT_CALL(src, GetNextPacket).WillRepeatedly([&](ts::TSPacket* packet) {
+    if (packets.empty()) {
+      return false;
+    }
+    ts::TSPacket::Copy(packet, &packets.front());
+    packets.pop();
+    return true;
+  });
+
+  {
+    testing::InSequence seq;
+    EXPECT_CALL(*sink, Start).WillOnce(testing::Return(true));
+    EXPECT_CALL(*sink, End).WillOnce(testing::Return());
+    EXPECT_CALL(*sink, GetExitCode).WillOnce(testing::Return(EXIT_SUCCESS));
+  }
+
+  EXPECT_CALL(*sink, HandlePacket(testing::_)).WillRepeatedly(testing::Return(true));
+  EXPECT_CALL(*sink, HandlePacket(testing::Truly([](const ts::TSPacket& packet) {
+    return packet.getPID() == ts::PID_NULL;
+  }))).Times(0);
+
+  filter->Connect(std::move(sink));
+  src.Connect(std::move(filter));
+  EXPECT_EQ(EXIT_SUCCESS, src.FeedPackets());
+  EXPECT_TRUE(packets.empty());
+}
+
+// These NullPacketAfter* tests verify that ServiceFilter does not incorrectly add
+// the Null PID (0x1FFF) to its filters.  If it does, subsequent NullPackets can
+// bypass the CheckFilterForDrop() check and trigger
+// `MIRAKC_ARIB_ASSERT(pid != ts::PID_NULL)` in HandlePacket(), causing mirakc-arib to abort.
+TEST(ServiceFilterTest, NullPacketAfterPatWithNullPmtPid) {
+  ExpectServiceFilterDropsNullPacketAfter(R"(
+    <?xml version="1.0" encoding="utf-8"?>
+    <tsduck>
+      <PAT version="1" current="true" transport_stream_id="0x1234"
+           test-pid="0x0000">
+        <service service_id="0x0001" program_map_PID="0x1FFF" />
+      </PAT>
+    </tsduck>
+  )");
+}
+
+TEST(ServiceFilterTest, NullPacketAfterCatWithNullCaPid) {
+  ExpectServiceFilterDropsNullPacketAfter(R"(
+    <?xml version="1.0" encoding="utf-8"?>
+    <tsduck>
+      <CAT version="1" current="true" test-pid="0x0001">
+        <CA_descriptor CA_system_id="0x0001" CA_PID="0x1FFF" />
+      </CAT>
+    </tsduck>
+  )");
+}
+
+TEST(ServiceFilterTest, NullPacketAfterPmtWithNullPcrPid) {
+  ExpectServiceFilterDropsNullPacketAfter(R"(
+    <?xml version="1.0" encoding="utf-8"?>
+    <tsduck>
+      <PAT version="1" current="true" transport_stream_id="0x1234"
+           test-pid="0x0000">
+        <service service_id="0x0001" program_map_PID="0x0101" />
+      </PAT>
+      <PMT version="1" current="true" service_id="0x0001" PCR_PID="0x1FFF"
+           test-pid="0x0101">
+        <component elementary_PID="0x0301" stream_type="0x02" />
+      </PMT>
+    </tsduck>
+  )");
+}
+
+TEST(ServiceFilterTest, NullPacketAfterPmtWithNullEcmCaPid) {
+  ExpectServiceFilterDropsNullPacketAfter(R"(
+    <?xml version="1.0" encoding="utf-8"?>
+    <tsduck>
+      <PAT version="1" current="true" transport_stream_id="0x1234"
+           test-pid="0x0000">
+        <service service_id="0x0001" program_map_PID="0x0101" />
+      </PAT>
+      <PMT version="1" current="true" service_id="0x0001" PCR_PID="0x0901"
+           test-pid="0x0101">
+        <CA_descriptor CA_system_id="0x0001" CA_PID="0x1FFF" />
+        <component elementary_PID="0x0301" stream_type="0x02" />
+      </PMT>
+    </tsduck>
+  )");
+}
+
+TEST(ServiceFilterTest, NullPacketAfterPmtWithNullStreamPid) {
+  ExpectServiceFilterDropsNullPacketAfter(R"(
+    <?xml version="1.0" encoding="utf-8"?>
+    <tsduck>
+      <PAT version="1" current="true" transport_stream_id="0x1234"
+           test-pid="0x0000">
+        <service service_id="0x0001" program_map_PID="0x0101" />
+      </PAT>
+      <PMT version="1" current="true" service_id="0x0001" PCR_PID="0x0901"
+           test-pid="0x0101">
+        <component elementary_PID="0x1FFF" stream_type="0x02" />
+      </PMT>
+    </tsduck>
+  )");
 }
 
 TEST(ServiceFilterTest, NoSidInPat) {

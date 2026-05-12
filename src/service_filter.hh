@@ -176,10 +176,14 @@ class ServiceFilter final : public PacketSink, public ts::TableHandlerInterface 
       return;
     }
 
+    auto new_pmt_pid = pat.pmts[option_.sid];
+    if (new_pmt_pid == ts::PID_NULL) {
+      MIRAKC_ARIB_SERVICE_FILTER_WARN("PAT.PMT_PID is null, skip");
+      return;
+    }
+
     psi_filter_.clear();
     MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Clear PSI/SI filter");
-
-    auto new_pmt_pid = pat.pmts[option_.sid];
 
     if (pmt_pid_ != ts::PID_NULL) {
       MIRAKC_ARIB_SERVICE_FILTER_INFO(
@@ -239,8 +243,12 @@ class ServiceFilter final : public PacketSink, public ts::TableHandlerInterface 
     auto i = cat.descs.search(ts::DID_CA);
     while (i < cat.descs.size()) {
       ts::CADescriptor desc(context_, *cat.descs[i]);
-      emm_filter_.insert(desc.ca_pid);
-      MIRAKC_ARIB_SERVICE_FILTER_DEBUG("EMM filter += EMM#{:04X}", desc.ca_pid);
+      if (desc.ca_pid == ts::PID_NULL) {
+        MIRAKC_ARIB_SERVICE_FILTER_WARN("CA_PID is null, skip adding to EMM filter");
+      } else {
+        emm_filter_.insert(desc.ca_pid);
+        MIRAKC_ARIB_SERVICE_FILTER_DEBUG("EMM filter += EMM#{:04X}", desc.ca_pid);
+      }
       i = cat.descs.search(ts::DID_CA, i + 1);
     }
   }
@@ -261,19 +269,34 @@ class ServiceFilter final : public PacketSink, public ts::TableHandlerInterface 
     content_filter_.clear();
     MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Clear content filter");
 
-    content_filter_.insert(pmt.pcr_pid);
-    MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Content filter += PCR#{:04X}", pmt.pcr_pid);
+    if (pmt.pcr_pid == ts::PID_NULL) {
+      MIRAKC_ARIB_SERVICE_FILTER_WARN("PCR_PID is null, skip adding to content filter");
+    } else {
+      content_filter_.insert(pmt.pcr_pid);
+      MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Content filter += PCR#{:04X}", pmt.pcr_pid);
+    }
 
     auto i = pmt.descs.search(ts::DID_CA);
     while (i < pmt.descs.size()) {
       ts::CADescriptor desc(context_, *pmt.descs[i]);
-      content_filter_.insert(desc.ca_pid);
-      MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Content filter += ECM#{:04X}", desc.ca_pid);
+      if (desc.ca_pid == ts::PID_NULL) {
+        MIRAKC_ARIB_SERVICE_FILTER_WARN("CA_PID is null, skip adding to content filter");
+      } else {
+        content_filter_.insert(desc.ca_pid);
+        MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Content filter += ECM#{:04X}", desc.ca_pid);
+      }
       i = pmt.descs.search(ts::DID_CA, i + 1);
     }
 
     for (auto it = pmt.streams.begin(); it != pmt.streams.end(); ++it) {
       ts::PID pid = it->first;
+
+      if (pid == ts::PID_NULL) {
+        MIRAKC_ARIB_SERVICE_FILTER_WARN(
+            "Elementary stream PID is null, skip adding to content filter");
+        continue;
+      }
+
       content_filter_.insert(pid);
 
       const auto& stream = it->second;
