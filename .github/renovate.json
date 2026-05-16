@@ -1,7 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
-  "enabledManagers": ["custom.regex", "pnpm"],
+  "enabledManagers": ["custom.regex", "npm"],
   "schedule": ["after 1am and before 2am"],
   "timezone": "UTC",
   "minimumReleaseAge": "7 days",
