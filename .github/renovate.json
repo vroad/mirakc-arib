@@ -2,6 +2,22 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
   "enabledManagers": ["custom.regex"],
+  "packageRules": [
+    {
+      "description": "Automerge MegaLinter minor and patch updates",
+      "matchDatasources": ["docker"],
+      "matchDepNames": ["ghcr.io/oxsecurity/megalinter-c_cpp"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
+    },
+    {
+      "description": "Create MegaLinter major update PRs without automerge",
+      "matchDatasources": ["docker"],
+      "matchDepNames": ["ghcr.io/oxsecurity/megalinter-c_cpp"],
+      "matchUpdateTypes": ["major"],
+      "automerge": false
+    }
+  ],
   "customManagers": [
     {
       "customType": "regex",
@@ -10,7 +26,8 @@
       "matchStrings": [
         "uses: docker://(?<depName>[^\\s@]+)@(?<currentDigest>sha256:[0-9a-f]+) +# (?<currentValue>v.+)"
       ],
-      "datasourceTemplate": "docker"
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "semver"
     },
     {
       "customType": "regex",
@@ -19,7 +36,8 @@
       "matchStrings": [
         "IMAGE='(?<depName>[^'@]+)@(?<currentDigest>sha256:[0-9a-f]+)' +# (?<currentValue>v.+)"
       ],
-      "datasourceTemplate": "docker"
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "semver"
     }
   ]
 }
