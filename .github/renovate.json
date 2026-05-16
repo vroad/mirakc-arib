@@ -1,0 +1,25 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "enabledManagers": ["custom.regex"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "MegaLinter image digest + version comment in the workflow",
+      "managerFilePatterns": [".github/workflows/mega-linter.yml"],
+      "matchStrings": [
+        "uses: docker://(?<depName>[^\\s@]+)@(?<currentDigest>sha256:[0-9a-f]+) +# (?<currentValue>v.+)"
+      ],
+      "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "MegaLinter image digest + version comment in scripts/mega-linter-runner.sh",
+      "managerFilePatterns": ["scripts/mega-linter-runner.sh"],
+      "matchStrings": [
+        "IMAGE='(?<depName>[^'@]+)@(?<currentDigest>sha256:[0-9a-f]+)' +# (?<currentValue>v.+)"
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ]
+}
