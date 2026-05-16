@@ -3,6 +3,6 @@
   "private": true,
   "packageManager": "pnpm@10.28.0",
   "devDependencies": {
-    "mega-linter-runner": "9.3.0"
+    "mega-linter-runner": "9.4.0"
   }
 }
