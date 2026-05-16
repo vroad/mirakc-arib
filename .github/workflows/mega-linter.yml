@@ -65,7 +65,7 @@ jobs:
 
         # Reference the image by digest directly: the oxsecurity/megalinter
         # action pins only the action, not the image it runs.
-        uses: docker://ghcr.io/oxsecurity/megalinter-c_cpp@sha256:108754f909ab6c9409b1114a7e24b5ed137e1ac3e51a8b574c045692ca70fbf9 # v8.8.0
+        uses: docker://ghcr.io/oxsecurity/megalinter-c_cpp@sha256:adc22d5499f3d7a0aed95e7d960c21244fdca61a2ca590dcfa49570b3c2335d6 # v9.3.0
 
         # All available variables are described in documentation
         # https://megalinter.io/latest/config-file/
