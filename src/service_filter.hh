@@ -44,12 +44,226 @@ struct ServiceFilterOption final {
   std::optional<ts::Time> time_limit = std::nullopt;  // JST
 };
 
-class ServiceFilter final : public PacketSink, public ts::TableHandlerInterface {
+class ServiceFilterControl {
  public:
-  explicit ServiceFilter(const ServiceFilterOption& option)
+  virtual ~ServiceFilterControl() = default;
+
+  virtual uint16_t TargetSid() const = 0;
+  virtual std::optional<ts::Time> TimeLimit() const = 0;
+
+  virtual void SetPmtPid(ts::PID new_pmt_pid) = 0;
+  virtual void SetOutputPat(const ts::PAT& pat) = 0;
+
+  virtual void SetPsiFilter(std::unordered_set<ts::PID> pids) = 0;
+  virtual void SetContentFilter(std::unordered_set<ts::PID> pids) = 0;
+  virtual void SetEmmFilter(std::unordered_set<ts::PID> pids) = 0;
+
+  virtual void SetDone() = 0;
+  virtual void SetError() = 0;
+};
+
+class ServiceFilterTableHandler {
+ public:
+  virtual ~ServiceFilterTableHandler() = default;
+  virtual void Handle(const ts::BinaryTable& table) = 0;
+};
+
+class DefaultServiceFilterTableHandler final : public ServiceFilterTableHandler {
+ public:
+  explicit DefaultServiceFilterTableHandler(
+      ServiceFilterControl& control, ts::DuckContext& context)
+      : control_(control), context_(context) {}
+
+  void Handle(const ts::BinaryTable& table) override {
+    switch (table.tableId()) {
+      case ts::TID_PAT:
+        HandlePat(table);
+        break;
+      case ts::TID_CAT:
+        HandleCat(table);
+        break;
+      case ts::TID_PMT:
+        HandlePmt(table);
+        break;
+      case ts::TID_TOT:
+        HandleTot(table);
+        break;
+      default:
+        break;
+    }
+  }
+
+ private:
+  void HandlePat(const ts::BinaryTable& table) {
+    if (table.sourcePID() != ts::PID_PAT) {
+      MIRAKC_ARIB_SERVICE_FILTER_WARN("PAT delivered with PID#{:04X}, skip", table.sourcePID());
+      return;
+    }
+
+    ts::PAT pat(context_, table);
+
+    if (!pat.isValid()) {
+      MIRAKC_ARIB_SERVICE_FILTER_WARN("Broken PAT, skip");
+      return;
+    }
+
+    if (pat.ts_id == 0) {
+      MIRAKC_ARIB_SERVICE_FILTER_WARN("PAT for TSID#0000, skip");
+      return;
+    }
+
+    auto target_sid = control_.TargetSid();
+    if (pat.pmts.find(target_sid) == pat.pmts.end()) {
+      MIRAKC_ARIB_SERVICE_FILTER_ERROR("SID#{:04X} not found in PAT", target_sid);
+      control_.SetError();
+      return;
+    }
+
+    control_.SetPsiFilter(std::unordered_set<ts::PID>{});
+    MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Clear PSI/SI filter");
+
+    auto new_pmt_pid = pat.pmts[target_sid];
+    control_.SetPmtPid(new_pmt_pid);
+
+    // Remove other services from PAT.
+    for (auto it = pat.pmts.begin(); it != pat.pmts.end();) {
+      if (it->first != target_sid) {
+        it = pat.pmts.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    MIRAKC_ARIB_ASSERT(pat.pmts.size() == 1);
+    MIRAKC_ARIB_ASSERT(pat.pmts.find(target_sid) != pat.pmts.end());
+
+    control_.SetOutputPat(pat);
+
+    std::unordered_set<ts::PID> psi_filter;
+    psi_filter.insert(ts::PID_PAT);
+    psi_filter.insert(ts::PID_CAT);
+    psi_filter.insert(ts::PID_NIT);
+    psi_filter.insert(ts::PID_SDT);
+    psi_filter.insert(ts::PID_EIT);
+    psi_filter.insert(ts::PID_RST);
+    psi_filter.insert(ts::PID_TOT);
+    psi_filter.insert(ts::PID_BIT);
+    psi_filter.insert(ts::PID_CDT);
+    psi_filter.insert(new_pmt_pid);
+    control_.SetPsiFilter(std::move(psi_filter));
+    MIRAKC_ARIB_SERVICE_FILTER_DEBUG(
+        "PSI/SI filter += PAT CAT NIT SDT EIT RST TOT BIT CDT PMT#{:04X}", new_pmt_pid);
+  }
+
+  void HandleCat(const ts::BinaryTable& table) {
+    ts::CAT cat(context_, table);
+
+    if (!cat.isValid()) {
+      MIRAKC_ARIB_SERVICE_FILTER_WARN("Broken CAT, skip");
+      return;
+    }
+
+    std::unordered_set<ts::PID> emm_filter;
+    MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Clear EMM filter");
+
+    auto i = cat.descs.search(ts::DID_CA);
+    while (i < cat.descs.size()) {
+      ts::CADescriptor desc(context_, *cat.descs[i]);
+      emm_filter.insert(desc.ca_pid);
+      MIRAKC_ARIB_SERVICE_FILTER_DEBUG("EMM filter += EMM#{:04X}", desc.ca_pid);
+      i = cat.descs.search(ts::DID_CA, i + 1);
+    }
+
+    control_.SetEmmFilter(std::move(emm_filter));
+  }
+
+  void HandlePmt(const ts::BinaryTable& table) {
+    ts::PMT pmt(context_, table);
+
+    if (!pmt.isValid()) {
+      MIRAKC_ARIB_SERVICE_FILTER_WARN("Broken PMT, skip");
+      return;
+    }
+
+    if (pmt.service_id != control_.TargetSid()) {
+      MIRAKC_ARIB_SERVICE_FILTER_WARN("PMT.SID#{} unmatched, skip", pmt.service_id);
+      return;
+    }
+
+    std::unordered_set<ts::PID> content_filter;
+    MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Clear content filter");
+
+    content_filter.insert(pmt.pcr_pid);
+    MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Content filter += PCR#{:04X}", pmt.pcr_pid);
+
+    auto i = pmt.descs.search(ts::DID_CA);
+    while (i < pmt.descs.size()) {
+      ts::CADescriptor desc(context_, *pmt.descs[i]);
+      content_filter.insert(desc.ca_pid);
+      MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Content filter += ECM#{:04X}", desc.ca_pid);
+      i = pmt.descs.search(ts::DID_CA, i + 1);
+    }
+
+    for (auto it = pmt.streams.begin(); it != pmt.streams.end(); ++it) {
+      ts::PID pid = it->first;
+      content_filter.insert(pid);
+
+      const auto& stream = it->second;
+      if (stream.isVideo()) {
+        MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Content filter += PES/Video#{:04X}", pid);
+      } else if (stream.isAudio()) {
+        MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Content filter += PES/Audio#{:04X}", pid);
+      } else if (stream.isSubtitles()) {
+        MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Content filter += PES/Subtitle#{:04X}", pid);
+      } else if (IsAribSubtitle(stream)) {
+        MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Content filter += PES/ARIB-Subtitle#{:04X}", pid);
+      } else if (IsAribSuperimposedText(stream)) {
+        MIRAKC_ARIB_SERVICE_FILTER_DEBUG(
+            "Content filter += PES/ARIB-SuperimposedText#{:04X}", pid);
+      } else {
+        MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Content filter += Other#{:04X}", pid);
+      }
+    }
+
+    control_.SetContentFilter(std::move(content_filter));
+  }
+
+  void HandleTot(const ts::BinaryTable& table) {
+    ts::TOT tot(context_, table);
+
+    if (!tot.isValid()) {
+      MIRAKC_ARIB_SERVICE_FILTER_WARN("Broken TOT, skip");
+      return;
+    }
+
+    auto time_limit = control_.TimeLimit();
+    if (!time_limit.has_value()) {
+      return;
+    }
+
+    if (tot.utc_time < time_limit.value()) {
+      return;
+    }
+
+    control_.SetDone();
+    MIRAKC_ARIB_SERVICE_FILTER_INFO("Over the time limit, stop streaming");
+  }
+
+  ServiceFilterControl& control_;
+  ts::DuckContext& context_;
+};
+
+class ServiceFilter final : public PacketSink,
+                            public ts::TableHandlerInterface,
+                            public ServiceFilterControl {
+ public:
+  explicit ServiceFilter(const ServiceFilterOption& option,
+      std::unique_ptr<ServiceFilterTableHandler> table_handler = nullptr)
       : option_(option),
         demux_(context_),
-        pat_packetizer_(ts::PID_PAT, ts::CyclingPacketizer::ALWAYS) {
+        pat_packetizer_(ts::PID_PAT, ts::CyclingPacketizer::ALWAYS),
+        table_handler_(table_handler
+                ? std::move(table_handler)
+                : std::make_unique<DefaultServiceFilterTableHandler>(*this, context_)) {
     demux_.setTableHandler(this);
     demux_.addPID(ts::PID_PAT);
     MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Demux PAT");
@@ -61,7 +275,7 @@ class ServiceFilter final : public PacketSink, public ts::TableHandlerInterface 
     }
   }
 
-  virtual ~ServiceFilter() override {}
+  ~ServiceFilter() override = default;
 
   void Connect(std::unique_ptr<PacketSink>&& sink) {
     sink_ = std::move(sink);
@@ -133,54 +347,18 @@ class ServiceFilter final : public PacketSink, public ts::TableHandlerInterface 
   }
 
   void handleTable(ts::SectionDemux&, const ts::BinaryTable& table) override {
-    switch (table.tableId()) {
-      case ts::TID_PAT:
-        HandlePat(table);
-        break;
-      case ts::TID_CAT:
-        HandleCat(table);
-        break;
-      case ts::TID_PMT:
-        HandlePmt(table);
-        break;
-      case ts::TID_TOT:
-        HandleTot(table);
-        break;
-      default:
-        break;
-    }
+    table_handler_->Handle(table);
   }
 
-  void HandlePat(const ts::BinaryTable& table) {
-    if (table.sourcePID() != ts::PID_PAT) {
-      MIRAKC_ARIB_SERVICE_FILTER_WARN("PAT delivered with PID#{:04X}, skip", table.sourcePID());
-      return;
-    }
+  uint16_t TargetSid() const override {
+    return option_.sid;
+  }
 
-    ts::PAT pat(context_, table);
+  std::optional<ts::Time> TimeLimit() const override {
+    return option_.time_limit;
+  }
 
-    if (!pat.isValid()) {
-      MIRAKC_ARIB_SERVICE_FILTER_WARN("Broken PAT, skip");
-      return;
-    }
-
-    if (pat.ts_id == 0) {
-      MIRAKC_ARIB_SERVICE_FILTER_WARN("PAT for TSID#0000, skip");
-      return;
-    }
-
-    if (pat.pmts.find(option_.sid) == pat.pmts.end()) {
-      MIRAKC_ARIB_SERVICE_FILTER_ERROR("SID#{:04X} not found in PAT", option_.sid);
-      done_ = true;
-      error_ = true;
-      return;
-    }
-
-    psi_filter_.clear();
-    MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Clear PSI/SI filter");
-
-    auto new_pmt_pid = pat.pmts[option_.sid];
-
+  void SetPmtPid(ts::PID new_pmt_pid) override {
     if (pmt_pid_ != ts::PID_NULL) {
       MIRAKC_ARIB_SERVICE_FILTER_INFO(
           "PID of PMT has been changed: {:04X} -> {:04X}", pmt_pid_, new_pmt_pid);
@@ -195,123 +373,33 @@ class ServiceFilter final : public PacketSink, public ts::TableHandlerInterface 
     pmt_pid_ = new_pmt_pid;
     demux_.addPID(pmt_pid_);
     MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Demux PMT#{:04X}", pmt_pid_);
+  }
 
-    // Remove other services from PAT.
-    for (auto it = pat.pmts.begin(); it != pat.pmts.end();) {
-      if (it->first != option_.sid) {
-        it = pat.pmts.erase(it);
-      } else {
-        ++it;
-      }
-    }
-    MIRAKC_ARIB_ASSERT(pat.pmts.size() == 1);
-    MIRAKC_ARIB_ASSERT(pat.pmts.find(option_.sid) != pat.pmts.end());
-
+  void SetOutputPat(const ts::PAT& pat) override {
     // Prepare packetizer for modified PAT.
     pat_packetizer_.removeAll();
     pat_packetizer_.addTable(context_, pat);
-
-    psi_filter_.insert(ts::PID_PAT);
-    psi_filter_.insert(ts::PID_CAT);
-    psi_filter_.insert(ts::PID_NIT);
-    psi_filter_.insert(ts::PID_SDT);
-    psi_filter_.insert(ts::PID_EIT);
-    psi_filter_.insert(ts::PID_RST);
-    psi_filter_.insert(ts::PID_TOT);
-    psi_filter_.insert(ts::PID_BIT);
-    psi_filter_.insert(ts::PID_CDT);
-    psi_filter_.insert(pmt_pid_);
-    MIRAKC_ARIB_SERVICE_FILTER_DEBUG(
-        "PSI/SI filter += PAT CAT NIT SDT EIT RST TOT BIT CDT PMT#{:04X}", pmt_pid_);
   }
 
-  void HandleCat(const ts::BinaryTable& table) {
-    ts::CAT cat(context_, table);
-
-    if (!cat.isValid()) {
-      MIRAKC_ARIB_SERVICE_FILTER_WARN("Broken CAT, skip");
-      return;
-    }
-
-    emm_filter_.clear();
-    MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Clear EMM filter");
-
-    auto i = cat.descs.search(ts::DID_CA);
-    while (i < cat.descs.size()) {
-      ts::CADescriptor desc(context_, *cat.descs[i]);
-      emm_filter_.insert(desc.ca_pid);
-      MIRAKC_ARIB_SERVICE_FILTER_DEBUG("EMM filter += EMM#{:04X}", desc.ca_pid);
-      i = cat.descs.search(ts::DID_CA, i + 1);
-    }
+  void SetPsiFilter(std::unordered_set<ts::PID> pids) override {
+    psi_filter_ = std::move(pids);
   }
 
-  void HandlePmt(const ts::BinaryTable& table) {
-    ts::PMT pmt(context_, table);
-
-    if (!pmt.isValid()) {
-      MIRAKC_ARIB_SERVICE_FILTER_WARN("Broken PMT, skip");
-      return;
-    }
-
-    if (pmt.service_id != option_.sid) {
-      MIRAKC_ARIB_SERVICE_FILTER_WARN("PMT.SID#{} unmatched, skip", pmt.service_id);
-      return;
-    }
-
-    content_filter_.clear();
-    MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Clear content filter");
-
-    content_filter_.insert(pmt.pcr_pid);
-    MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Content filter += PCR#{:04X}", pmt.pcr_pid);
-
-    auto i = pmt.descs.search(ts::DID_CA);
-    while (i < pmt.descs.size()) {
-      ts::CADescriptor desc(context_, *pmt.descs[i]);
-      content_filter_.insert(desc.ca_pid);
-      MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Content filter += ECM#{:04X}", desc.ca_pid);
-      i = pmt.descs.search(ts::DID_CA, i + 1);
-    }
-
-    for (auto it = pmt.streams.begin(); it != pmt.streams.end(); ++it) {
-      ts::PID pid = it->first;
-      content_filter_.insert(pid);
-
-      const auto& stream = it->second;
-      if (stream.isVideo()) {
-        MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Content filter += PES/Video#{:04X}", pid);
-      } else if (stream.isAudio()) {
-        MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Content filter += PES/Audio#{:04X}", pid);
-      } else if (stream.isSubtitles()) {
-        MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Content filter += PES/Subtitle#{:04X}", pid);
-      } else if (IsAribSubtitle(stream)) {
-        MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Content filter += PES/ARIB-Subtitle#{:04X}", pid);
-      } else if (IsAribSuperimposedText(stream)) {
-        MIRAKC_ARIB_SERVICE_FILTER_DEBUG(
-            "Content filter += PES/ARIB-SuperimposedText#{:04X}", pid);
-      } else {
-        MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Content filter += Other#{:04X}", pid);
-      }
-    }
+  void SetContentFilter(std::unordered_set<ts::PID> pids) override {
+    content_filter_ = std::move(pids);
   }
 
-  void HandleTot(const ts::BinaryTable& table) {
-    ts::TOT tot(context_, table);
-
-    if (!tot.isValid()) {
-      MIRAKC_ARIB_SERVICE_FILTER_WARN("Broken TOT, skip");
-      return;
-    }
-
-    CheckTimeLimit(tot.utc_time);  // JST in ARIB
+  void SetEmmFilter(std::unordered_set<ts::PID> pids) override {
+    emm_filter_ = std::move(pids);
   }
 
-  void CheckTimeLimit(const ts::Time& jst_time) {
-    if (jst_time < option_.time_limit.value()) {
-      return;
-    }
-
+  void SetDone() override {
     done_ = true;
-    MIRAKC_ARIB_SERVICE_FILTER_INFO("Over the time limit, stop streaming");
+  }
+
+  void SetError() override {
+    done_ = true;
+    error_ = true;
   }
 
   const ServiceFilterOption option_;
@@ -325,6 +413,7 @@ class ServiceFilter final : public PacketSink, public ts::TableHandlerInterface 
   ts::PID pmt_pid_ = ts::PID_NULL;
   bool done_ = false;
   bool error_ = false;
+  std::unique_ptr<ServiceFilterTableHandler> table_handler_;
 
   MIRAKC_ARIB_NON_COPYABLE(ServiceFilter);
 };
