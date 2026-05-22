@@ -872,7 +872,9 @@ if(MIRAKC_ARIB_TEST)
     test/pcr_synchronizer_test.cc
     test/program_filter_test.cc
     test/ring_file_sink_test.cc
+    test/service_filter_handler_test.cc
     test/service_filter_test.cc
+    test/service_filter_unit_test.cc
     test/service_recorder_test.cc
     test/service_scanner_test.cc
     test/start_seeker_test.cc
