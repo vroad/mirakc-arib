@@ -30,6 +30,7 @@
 #include "jsonl_source.hh"
 #include "logging.hh"
 #include "packet_source.hh"
+#include "table_validator.hh"
 #include "tsduck_helper.hh"
 
 namespace {
@@ -105,60 +106,40 @@ class ServiceScanner final : public PacketSink,
   }
 
   void HandlePat(const ts::BinaryTable& table) {
-    if (table.sourcePID() != ts::PID_PAT) {
-      MIRAKC_ARIB_WARN("PAT delivered with PID#{:04X}, skip", table.sourcePID());
+    ts::PAT pat(context_, table);
+    if (auto r = ValidatePat(pat, table); r != TableValidateResult::kOk) {
+      LogValidateError("service-scanner", r, table);
       return;
     }
-
-    std::unique_ptr<ts::PAT> pat = std::make_unique<ts::PAT>(context_, table);
-
-    if (!pat->isValid()) {
-      MIRAKC_ARIB_WARN("Broken PAT, skip");
-      return;
-    }
-
-    if (pat->ts_id == 0) {
-      MIRAKC_ARIB_WARN("PAT for TSID#0000, skip");
-      return;
-    }
-
-    if (pat->nit_pid != ts::PID_NULL && pat->nit_pid != ts::PID_NIT) {
-      MIRAKC_ARIB_INFO("Non-standard NIT#{:04X}, reset NIT", pat->nit_pid);
+    if (pat.nit_pid != ts::PID_NULL && pat.nit_pid != ts::PID_NIT) {
+      MIRAKC_ARIB_INFO("Non-standard NIT#{:04X}, reset NIT", pat.nit_pid);
       nit_.reset();
       demux_.removePID(ts::PID_NIT);
-      demux_.addPID(pat->nit_pid);
+      demux_.addPID(pat.nit_pid);
     }
 
-    pat_ = std::move(pat);
+    pat_ = std::make_unique<ts::PAT>(std::move(pat));
     MIRAKC_ARIB_INFO("PAT ready");
   }
 
   void HandleNit(const ts::BinaryTable& table) {
-    std::unique_ptr<ts::NIT> nit = std::make_unique<ts::NIT>(context_, table);
-
-    if (!nit->isValid()) {
-      MIRAKC_ARIB_WARN("Broken NIT, skip");
+    ts::NIT nit(context_, table);
+    if (auto r = ValidateNit(nit); r != TableValidateResult::kOk) {
+      LogValidateError("service-scanner", r, table);
       return;
     }
-
-    nit_ = std::move(nit);
+    nit_ = std::make_unique<ts::NIT>(std::move(nit));
     MIRAKC_ARIB_INFO("NIT ready");
   }
 
   void HandleSdt(const ts::BinaryTable& table) {
-    std::unique_ptr<ts::SDT> sdt = std::make_unique<ts::SDT>(context_, table);
-
-    if (!sdt->isValid()) {
-      MIRAKC_ARIB_WARN("Broken SDT, skip");
+    ts::SDT sdt(context_, table);
+    if (auto r = ValidateSdt(sdt); r != TableValidateResult::kOk) {
+      LogValidateError("service-scanner", r, table);
       return;
     }
 
-    if (sdt->ts_id == 0) {
-      MIRAKC_ARIB_WARN("SDT for TSID#0000, skip");
-      return;
-    }
-
-    sdt_ = std::move(sdt);
+    sdt_ = std::make_unique<ts::SDT>(std::move(sdt));
     MIRAKC_ARIB_INFO("SDT ready");
   }
 

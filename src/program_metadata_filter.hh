@@ -26,6 +26,7 @@
 #include "jsonl_source.hh"
 #include "logging.hh"
 #include "packet_sink.hh"
+#include "table_validator.hh"
 #include "tsduck_helper.hh"
 
 namespace {
@@ -65,12 +66,10 @@ class ProgramMetadataFilter final : public PacketSink,
 
   void HandleEit(const ts::BinaryTable& table) {
     ts::EIT eit(context_, table);
-
-    if (!eit.isValid()) {
+    if (ValidateEit(eit) != TableValidateResult::kOk) {
       MIRAKC_ARIB_WARN("Broken EIT, skip");
       return;
     }
-
     if (option_.sid != 0 && eit.service_id != option_.sid) {
       return;
     }

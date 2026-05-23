@@ -805,6 +805,7 @@ add_executable(mirakc-arib
   src/service_recorder.hh
   src/service_scanner.hh
   src/start_seeker.hh
+  src/table_validator.hh
   src/tsduck_helper.hh
 )
 
@@ -876,6 +877,7 @@ if(MIRAKC_ARIB_TEST)
     test/service_recorder_test.cc
     test/service_scanner_test.cc
     test/start_seeker_test.cc
+    test/table_validator_test.cc
     test/test.cc
     test/test_helper.hh
     test/tsduck_helper_test.cc

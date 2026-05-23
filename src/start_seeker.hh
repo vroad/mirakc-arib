@@ -27,6 +27,7 @@
 #include "logging.hh"
 #include "packet_sink.hh"
 #include "packet_source.hh"
+#include "table_validator.hh"
 #include "tsduck_helper.hh"
 
 namespace {
@@ -179,27 +180,15 @@ class StartSeeker final : public PacketSink, public ts::TableHandlerInterface {
   }
 
   void HandlePat(const ts::BinaryTable& table) {
-    if (table.sourcePID() != ts::PID_PAT) {
-      MIRAKC_ARIB_WARN("PAT delivered with PID#{:04X}, skip", table.sourcePID());
-      return;
-    }
-
     ts::PAT pat(context_, table);
-
-    if (!pat.isValid()) {
-      MIRAKC_ARIB_WARN("Broken PAT, skip");
+    if (auto r = ValidatePat(pat, table); r != TableValidateResult::kOk) {
+      LogValidateError("start-seeker", r, table);
       return;
     }
-
-    if (pat.ts_id == 0) {
-      MIRAKC_ARIB_WARN("PAT for TSID#0000, skip");
-      return;
-    }
-
     // The following condition is ensured by ServiceFilter.
     MIRAKC_ARIB_ASSERT(pat.pmts.find(option_.sid) != pat.pmts.end());
 
-    auto new_pmt_pid = pat.pmts[option_.sid];
+    auto new_pmt_pid = pat.pmts.at(option_.sid);
 
     if (pmt_pid_ != ts::PID_NULL) {
       MIRAKC_ARIB_DEBUG("Demux -= PMT#{:04X}", pmt_pid_);
@@ -218,12 +207,10 @@ class StartSeeker final : public PacketSink, public ts::TableHandlerInterface {
 
   void HandlePmt(const ts::BinaryTable& table) {
     ts::PMT pmt(context_, table);
-
-    if (!pmt.isValid()) {
-      MIRAKC_ARIB_WARN("Broken PMT, skip");
+    if (auto r = ValidatePmt(pmt); r != TableValidateResult::kOk) {
+      LogValidateError("start-seeker", r, table);
       return;
     }
-
     if (pmt.service_id != option_.sid) {
       MIRAKC_ARIB_WARN("PMT.SID#{} unmatched, skip", pmt.service_id);
       return;

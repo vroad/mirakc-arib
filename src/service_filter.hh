@@ -29,6 +29,7 @@
 #include "logging.hh"
 #include "packet_sink.hh"
 #include "packet_source.hh"
+#include "table_validator.hh"
 #include "tsduck_helper.hh"
 
 #define MIRAKC_ARIB_SERVICE_FILTER_TRACE(...) MIRAKC_ARIB_TRACE("service-filter: " __VA_ARGS__)
@@ -152,23 +153,11 @@ class ServiceFilter final : public PacketSink, public ts::TableHandlerInterface 
   }
 
   void HandlePat(const ts::BinaryTable& table) {
-    if (table.sourcePID() != ts::PID_PAT) {
-      MIRAKC_ARIB_SERVICE_FILTER_WARN("PAT delivered with PID#{:04X}, skip", table.sourcePID());
-      return;
-    }
-
     ts::PAT pat(context_, table);
-
-    if (!pat.isValid()) {
-      MIRAKC_ARIB_SERVICE_FILTER_WARN("Broken PAT, skip");
+    if (auto r = ValidatePat(pat, table); r != TableValidateResult::kOk) {
+      LogValidateError("service-filter", r, table);
       return;
     }
-
-    if (pat.ts_id == 0) {
-      MIRAKC_ARIB_SERVICE_FILTER_WARN("PAT for TSID#0000, skip");
-      return;
-    }
-
     if (pat.pmts.find(option_.sid) == pat.pmts.end()) {
       MIRAKC_ARIB_SERVICE_FILTER_ERROR("SID#{:04X} not found in PAT", option_.sid);
       done_ = true;
@@ -227,12 +216,10 @@ class ServiceFilter final : public PacketSink, public ts::TableHandlerInterface 
 
   void HandleCat(const ts::BinaryTable& table) {
     ts::CAT cat(context_, table);
-
-    if (!cat.isValid()) {
-      MIRAKC_ARIB_SERVICE_FILTER_WARN("Broken CAT, skip");
+    if (auto r = ValidateCat(cat); r != TableValidateResult::kOk) {
+      LogValidateError("service-filter", r, table);
       return;
     }
-
     emm_filter_.clear();
     MIRAKC_ARIB_SERVICE_FILTER_DEBUG("Clear EMM filter");
 
@@ -247,12 +234,10 @@ class ServiceFilter final : public PacketSink, public ts::TableHandlerInterface 
 
   void HandlePmt(const ts::BinaryTable& table) {
     ts::PMT pmt(context_, table);
-
-    if (!pmt.isValid()) {
-      MIRAKC_ARIB_SERVICE_FILTER_WARN("Broken PMT, skip");
+    if (auto r = ValidatePmt(pmt); r != TableValidateResult::kOk) {
+      LogValidateError("service-filter", r, table);
       return;
     }
-
     if (pmt.service_id != option_.sid) {
       MIRAKC_ARIB_SERVICE_FILTER_WARN("PMT.SID#{} unmatched, skip", pmt.service_id);
       return;
@@ -296,12 +281,10 @@ class ServiceFilter final : public PacketSink, public ts::TableHandlerInterface 
 
   void HandleTot(const ts::BinaryTable& table) {
     ts::TOT tot(context_, table);
-
-    if (!tot.isValid()) {
-      MIRAKC_ARIB_SERVICE_FILTER_WARN("Broken TOT, skip");
+    if (auto r = ValidateTot(tot); r != TableValidateResult::kOk) {
+      LogValidateError("service-filter", r, table);
       return;
     }
-
     CheckTimeLimit(tot.utc_time);  // JST in ARIB
   }
 

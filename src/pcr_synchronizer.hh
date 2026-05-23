@@ -30,6 +30,7 @@
 #include "jsonl_source.hh"
 #include "logging.hh"
 #include "packet_source.hh"
+#include "table_validator.hh"
 #include "tsduck_helper.hh"
 
 namespace {
@@ -138,23 +139,11 @@ class PcrSynchronizer final : public PacketSink,
   }
 
   void HandlePat(const ts::BinaryTable& table) {
-    if (table.sourcePID() != ts::PID_PAT) {
-      MIRAKC_ARIB_WARN("PAT delivered with PID#{:04X}, skip", table.sourcePID());
-      return;
-    }
-
     ts::PAT pat(context_, table);
-
-    if (!pat.isValid()) {
-      MIRAKC_ARIB_WARN("Broken PAT, skip");
+    if (auto r = ValidatePat(pat, table); r != TableValidateResult::kOk) {
+      LogValidateError("pcr-synchronizer", r, table);
       return;
     }
-
-    if (pat.ts_id == 0) {
-      MIRAKC_ARIB_WARN("PAT for TSID#0000, skip");
-      return;
-    }
-
     if (!pmt_pids_.empty()) {
       ResetStates();
     }
@@ -182,12 +171,10 @@ class PcrSynchronizer final : public PacketSink,
 
   void HandleSdt(const ts::BinaryTable& table) {
     ts::SDT sdt(context_, table);
-
-    if (!sdt.isValid()) {
-      MIRAKC_ARIB_WARN("Broken SDT, skip");
+    if (auto r = ValidateSdt(sdt); r != TableValidateResult::kOk) {
+      LogValidateError("pcr-synchronizer", r, table);
       return;
     }
-
     nid_ = sdt.onetw_id;
     tsid_ = sdt.ts_id;
 
@@ -209,12 +196,10 @@ class PcrSynchronizer final : public PacketSink,
 
   void HandlePmt(const ts::BinaryTable& table) {
     ts::PMT pmt(context_, table);
-
-    if (!pmt.isValid()) {
-      MIRAKC_ARIB_WARN("Broken PMT, skip");
+    if (auto r = ValidatePmt(pmt); r != TableValidateResult::kOk) {
+      LogValidateError("pcr-synchronizer", r, table);
       return;
     }
-
     auto it = pmt_pids_.find(pmt.service_id);
     if (it == pmt_pids_.end()) {
       MIRAKC_ARIB_WARN("PMT.SID#{} unmatched, skip", pmt.service_id);
@@ -239,12 +224,10 @@ class PcrSynchronizer final : public PacketSink,
 
   void HandleTot(const ts::BinaryTable& table) {
     ts::TOT tot(context_, table);
-
-    if (!tot.isValid()) {
-      MIRAKC_ARIB_WARN("Broken TOT, skip");
+    if (auto r = ValidateTot(tot); r != TableValidateResult::kOk) {
+      LogValidateError("pcr-synchronizer", r, table);
       return;
     }
-
     HandleTime(tot.utc_time);  // JST in ARIB
   }
 
