@@ -221,12 +221,11 @@ class ServiceRecorder final : public PacketSink,
   }
 
   void HandleEit(const ts::BinaryTable& table) {
-    ts::EIT parsed_eit(context_, table);
-    if (auto r = ValidateEit(parsed_eit); r != TableValidateResult::kOk) {
+    auto eit = std::make_shared<ts::EIT>(context_, table);
+    if (auto r = ValidateEit(*eit); r != TableValidateResult::kOk) {
       LogValidateError("service-recorder", r, table);
       return;
     }
-    auto eit = std::make_shared<ts::EIT>(parsed_eit);
 
     if (eit->service_id != option_.sid) {
       MIRAKC_ARIB_SERVICE_RECORDER_DEBUG("EIT[p/f]: SID#{:04X}, skip", eit->service_id);
