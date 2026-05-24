@@ -39,6 +39,9 @@ inline bool IsValidIndirectPid(ts::PID pid) {
 
 // ---- PAT ----
 
+// Some channels (e.g. BS-NTV, BS11) occasionally broadcast a spurious PAT on
+// PID 0x0012 around midnight.  It carries ts_id=0 and no NIT PID entry, so we
+// reject any PAT that is not delivered on PID_PAT (0x0000).
 inline TableValidateResult ValidatePat(const ts::PAT& pat, const ts::BinaryTable& table) {
   if (table.sourcePID() != ts::PID_PAT)
     return TableValidateResult::kWrongPatPid;
