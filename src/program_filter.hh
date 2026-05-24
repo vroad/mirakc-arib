@@ -57,12 +57,18 @@ struct ProgramFilterOption final {
 };
 
 inline TableValidateResult ValidateProgramFilterPat(
-    const ts::PAT& pat, const ts::BinaryTable& table, uint16_t) {
-  return ValidatePat(pat, table);
+    const ts::PAT& pat, const ts::BinaryTable& table, uint16_t sid) {
+  if (auto r = ValidatePat(pat, table); r != TableValidateResult::kOk)
+    return r;
+  return ValidatePatPmtPid(pat, sid);
 }
 
 inline TableValidateResult ValidateProgramFilterPmt(const ts::PMT& pmt) {
-  return ValidatePmt(pmt);
+  if (auto r = ValidatePmt(pmt); r != TableValidateResult::kOk)
+    return r;
+  if (auto r = ValidatePmtPcrPid(pmt); r != TableValidateResult::kOk)
+    return r;
+  return ValidateAllPmtStreamPids(pmt);
 }
 
 class ProgramFilter final : public PacketSink, public ts::TableHandlerInterface {

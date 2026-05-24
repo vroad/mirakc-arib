@@ -45,6 +45,29 @@ struct ServiceFilterOption final {
   std::optional<ts::Time> time_limit = std::nullopt;  // JST
 };
 
+inline TableValidateResult ValidateServiceFilterPat(
+    const ts::PAT& pat, const ts::BinaryTable& table, uint16_t sid) {
+  if (auto r = ValidatePat(pat, table); r != TableValidateResult::kOk)
+    return r;
+  return ValidatePatPmtPid(pat, sid);
+}
+
+inline TableValidateResult ValidateServiceFilterCat(ts::DuckContext& context, const ts::CAT& cat) {
+  if (auto r = ValidateCat(cat); r != TableValidateResult::kOk)
+    return r;
+  return ValidateAllCatCaPids(context, cat);
+}
+
+inline TableValidateResult ValidateServiceFilterPmt(ts::DuckContext& context, const ts::PMT& pmt) {
+  if (auto r = ValidatePmt(pmt); r != TableValidateResult::kOk)
+    return r;
+  if (auto r = ValidatePmtPcrPid(pmt); r != TableValidateResult::kOk)
+    return r;
+  if (auto r = ValidateAllPmtCaPids(context, pmt); r != TableValidateResult::kOk)
+    return r;
+  return ValidateAllPmtStreamPids(pmt);
+}
+
 class ServiceFilter final : public PacketSink, public ts::TableHandlerInterface {
  public:
   explicit ServiceFilter(const ServiceFilterOption& option)
@@ -154,7 +177,8 @@ class ServiceFilter final : public PacketSink, public ts::TableHandlerInterface 
 
   void HandlePat(const ts::BinaryTable& table) {
     ts::PAT pat(context_, table);
-    if (auto r = ValidatePat(pat, table); r != TableValidateResult::kOk) {
+    if (auto r = ValidateServiceFilterPat(pat, table, option_.sid);
+        r != TableValidateResult::kOk) {
       LogValidateError("service-filter", r, table);
       return;
     }
@@ -216,7 +240,7 @@ class ServiceFilter final : public PacketSink, public ts::TableHandlerInterface 
 
   void HandleCat(const ts::BinaryTable& table) {
     ts::CAT cat(context_, table);
-    if (auto r = ValidateCat(cat); r != TableValidateResult::kOk) {
+    if (auto r = ValidateServiceFilterCat(context_, cat); r != TableValidateResult::kOk) {
       LogValidateError("service-filter", r, table);
       return;
     }
@@ -234,7 +258,7 @@ class ServiceFilter final : public PacketSink, public ts::TableHandlerInterface 
 
   void HandlePmt(const ts::BinaryTable& table) {
     ts::PMT pmt(context_, table);
-    if (auto r = ValidatePmt(pmt); r != TableValidateResult::kOk) {
+    if (auto r = ValidateServiceFilterPmt(context_, pmt); r != TableValidateResult::kOk) {
       LogValidateError("service-filter", r, table);
       return;
     }

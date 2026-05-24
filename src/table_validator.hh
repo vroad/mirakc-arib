@@ -30,7 +30,12 @@ enum class TableValidateResult {
   kBrokenTable,
   kZeroPatTsId,
   kZeroSdtTsId,
+  kInvalidIndirectPid,
 };
+
+inline bool IsValidIndirectPid(ts::PID pid) {
+  return pid >= 0x0030 && pid < ts::PID_NULL;
+}
 
 // ---- PAT ----
 
@@ -44,6 +49,23 @@ inline TableValidateResult ValidatePat(const ts::PAT& pat, const ts::BinaryTable
   return TableValidateResult::kOk;
 }
 
+// Note that this function returns kOk even when the service ID is not found. Callers are
+// responsible for checking whether the PAT contains the requested service ID.
+inline TableValidateResult ValidatePatPmtPid(const ts::PAT& pat, uint16_t sid) {
+  auto it = pat.pmts.find(sid);
+  if (it != pat.pmts.end() && !IsValidIndirectPid(it->second))
+    return TableValidateResult::kInvalidIndirectPid;
+  return TableValidateResult::kOk;
+}
+
+inline TableValidateResult ValidateAllPatPmtPids(const ts::PAT& pat) {
+  for (const auto& [sid, pmt_pid] : pat.pmts) {
+    if (!IsValidIndirectPid(pmt_pid))
+      return TableValidateResult::kInvalidIndirectPid;
+  }
+  return TableValidateResult::kOk;
+}
+
 // ---- CAT ----
 
 inline TableValidateResult ValidateCat(const ts::CAT& cat) {
@@ -52,11 +74,47 @@ inline TableValidateResult ValidateCat(const ts::CAT& cat) {
   return TableValidateResult::kOk;
 }
 
+inline TableValidateResult ValidateAllCatCaPids(ts::DuckContext& context, const ts::CAT& cat) {
+  auto i = cat.descs.search(ts::DID_CA);
+  while (i < cat.descs.size()) {
+    ts::CADescriptor desc(context, *cat.descs[i]);
+    if (!IsValidIndirectPid(desc.ca_pid))
+      return TableValidateResult::kInvalidIndirectPid;
+    i = cat.descs.search(ts::DID_CA, i + 1);
+  }
+  return TableValidateResult::kOk;
+}
+
 // ---- PMT ----
 
 inline TableValidateResult ValidatePmt(const ts::PMT& pmt) {
   if (!pmt.isValid())
     return TableValidateResult::kBrokenTable;
+  return TableValidateResult::kOk;
+}
+
+inline TableValidateResult ValidatePmtPcrPid(const ts::PMT& pmt) {
+  if (!IsValidIndirectPid(pmt.pcr_pid))
+    return TableValidateResult::kInvalidIndirectPid;
+  return TableValidateResult::kOk;
+}
+
+inline TableValidateResult ValidateAllPmtCaPids(ts::DuckContext& context, const ts::PMT& pmt) {
+  auto i = pmt.descs.search(ts::DID_CA);
+  while (i < pmt.descs.size()) {
+    ts::CADescriptor desc(context, *pmt.descs[i]);
+    if (!IsValidIndirectPid(desc.ca_pid))
+      return TableValidateResult::kInvalidIndirectPid;
+    i = pmt.descs.search(ts::DID_CA, i + 1);
+  }
+  return TableValidateResult::kOk;
+}
+
+inline TableValidateResult ValidateAllPmtStreamPids(const ts::PMT& pmt) {
+  for (const auto& [pid, stream] : pmt.streams) {
+    if (!IsValidIndirectPid(pid))
+      return TableValidateResult::kInvalidIndirectPid;
+  }
   return TableValidateResult::kOk;
 }
 
@@ -119,6 +177,9 @@ inline void LogValidateError(
       break;
     case TableValidateResult::kZeroSdtTsId:
       MIRAKC_ARIB_WARN("{}: SDT for TSID#0000, skip", tag);
+      break;
+    case TableValidateResult::kInvalidIndirectPid:
+      MIRAKC_ARIB_WARN("{}: Table has invalid indirect PID, skip", tag);
       break;
     case TableValidateResult::kOk:
       break;

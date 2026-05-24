@@ -49,12 +49,16 @@ struct ServiceRecorderOption final {
 };
 
 inline TableValidateResult ValidateServiceRecorderPat(
-    const ts::PAT& pat, const ts::BinaryTable& table, uint16_t) {
-  return ValidatePat(pat, table);
+    const ts::PAT& pat, const ts::BinaryTable& table, uint16_t sid) {
+  if (auto r = ValidatePat(pat, table); r != TableValidateResult::kOk)
+    return r;
+  return ValidatePatPmtPid(pat, sid);
 }
 
 inline TableValidateResult ValidateServiceRecorderPmt(const ts::PMT& pmt) {
-  return ValidatePmt(pmt);
+  if (auto r = ValidatePmt(pmt); r != TableValidateResult::kOk)
+    return r;
+  return ValidatePmtPcrPid(pmt);
 }
 
 class ServiceRecorder final : public PacketSink,

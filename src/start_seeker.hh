@@ -38,6 +38,21 @@ struct StartSeekerOption final {
   uint32_t max_packets = 0;
 };
 
+inline TableValidateResult ValidateStartSeekerPat(
+    const ts::PAT& pat, const ts::BinaryTable& table, uint16_t sid) {
+  if (auto r = ValidatePat(pat, table); r != TableValidateResult::kOk)
+    return r;
+  return ValidatePatPmtPid(pat, sid);
+}
+
+inline TableValidateResult ValidateStartSeekerPmt(const ts::PMT& pmt) {
+  if (auto r = ValidatePmt(pmt); r != TableValidateResult::kOk)
+    return r;
+  if (auto r = ValidatePmtPcrPid(pmt); r != TableValidateResult::kOk)
+    return r;
+  return ValidateAllPmtStreamPids(pmt);
+}
+
 class StartSeeker final : public PacketSink, public ts::TableHandlerInterface {
  public:
   explicit StartSeeker(const StartSeekerOption& option) : option_(option), demux_(context_) {
@@ -181,7 +196,7 @@ class StartSeeker final : public PacketSink, public ts::TableHandlerInterface {
 
   void HandlePat(const ts::BinaryTable& table) {
     ts::PAT pat(context_, table);
-    if (auto r = ValidatePat(pat, table); r != TableValidateResult::kOk) {
+    if (auto r = ValidateStartSeekerPat(pat, table, option_.sid); r != TableValidateResult::kOk) {
       LogValidateError("start-seeker", r, table);
       return;
     }
@@ -207,7 +222,7 @@ class StartSeeker final : public PacketSink, public ts::TableHandlerInterface {
 
   void HandlePmt(const ts::BinaryTable& table) {
     ts::PMT pmt(context_, table);
-    if (auto r = ValidatePmt(pmt); r != TableValidateResult::kOk) {
+    if (auto r = ValidateStartSeekerPmt(pmt); r != TableValidateResult::kOk) {
       LogValidateError("start-seeker", r, table);
       return;
     }

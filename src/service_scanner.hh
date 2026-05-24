@@ -40,6 +40,13 @@ struct ServiceScannerOption final {
   SidSet xsids;
 };
 
+inline TableValidateResult ValidateServiceScannerPat(
+    const ts::PAT& pat, const ts::BinaryTable& table) {
+  if (auto r = ValidatePat(pat, table); r != TableValidateResult::kOk)
+    return r;
+  return ValidateAllPatPmtPids(pat);
+}
+
 // The implementation is based on tsTSScanner.cpp.  Unlike the ts::TSScanner
 // class, this class reads data from the PacketSink class.
 class ServiceScanner final : public PacketSink,
@@ -107,7 +114,7 @@ class ServiceScanner final : public PacketSink,
 
   void HandlePat(const ts::BinaryTable& table) {
     ts::PAT pat(context_, table);
-    if (auto r = ValidatePat(pat, table); r != TableValidateResult::kOk) {
+    if (auto r = ValidateServiceScannerPat(pat, table); r != TableValidateResult::kOk) {
       LogValidateError("service-scanner", r, table);
       return;
     }

@@ -40,6 +40,31 @@ struct PcrSynchronizerOption final {
   SidSet xsids;
 };
 
+inline bool IsPcrSynchronizerTargetService(const PcrSynchronizerOption& option, uint16_t sid) {
+  if (!option.sids.IsEmpty() && !option.sids.Contain(sid))
+    return false;
+  if (!option.xsids.IsEmpty() && option.xsids.Contain(sid))
+    return false;
+  return true;
+}
+
+inline TableValidateResult ValidatePcrSynchronizerPat(
+    const ts::PAT& pat, const ts::BinaryTable& table, const PcrSynchronizerOption& option) {
+  if (auto r = ValidatePat(pat, table); r != TableValidateResult::kOk)
+    return r;
+  for (const auto& [sid, pmt_pid] : pat.pmts) {
+    if (IsPcrSynchronizerTargetService(option, sid) && !IsValidIndirectPid(pmt_pid))
+      return TableValidateResult::kInvalidIndirectPid;
+  }
+  return TableValidateResult::kOk;
+}
+
+inline TableValidateResult ValidatePcrSynchronizerPmt(const ts::PMT& pmt) {
+  if (auto r = ValidatePmt(pmt); r != TableValidateResult::kOk)
+    return r;
+  return ValidatePmtPcrPid(pmt);
+}
+
 class PcrSynchronizer final : public PacketSink,
                               public JsonlSource,
                               public ts::TableHandlerInterface {
@@ -140,7 +165,10 @@ class PcrSynchronizer final : public PacketSink,
 
   void HandlePat(const ts::BinaryTable& table) {
     ts::PAT pat(context_, table);
-    if (auto r = ValidatePat(pat, table); r != TableValidateResult::kOk) {
+    if (auto r = ValidatePcrSynchronizerPat(pat, table, option_); r != TableValidateResult::kOk) {
+      if (r == TableValidateResult::kInvalidIndirectPid && !pmt_pids_.empty()) {
+        ResetStates();
+      }
       LogValidateError("pcr-synchronizer", r, table);
       return;
     }
@@ -149,12 +177,12 @@ class PcrSynchronizer final : public PacketSink,
     }
 
     for (const auto& [sid, pmt_pid] : pat.pmts) {
-      if (!option_.sids.IsEmpty() && !option_.sids.Contain(sid)) {
-        MIRAKC_ARIB_DEBUG("Ignore SID#{:04X} according to the inclusion list", sid);
-        continue;
-      }
-      if (!option_.xsids.IsEmpty() && option_.xsids.Contain(sid)) {
-        MIRAKC_ARIB_DEBUG("Ignore SID#{:04X} according to the exclusion list", sid);
+      if (!IsPcrSynchronizerTargetService(option_, sid)) {
+        if (!option_.sids.IsEmpty() && !option_.sids.Contain(sid)) {
+          MIRAKC_ARIB_DEBUG("Ignore SID#{:04X} according to the inclusion list", sid);
+        } else {
+          MIRAKC_ARIB_DEBUG("Ignore SID#{:04X} according to the exclusion list", sid);
+        }
         continue;
       }
       pmt_pids_[sid] = pmt_pid;
@@ -196,7 +224,7 @@ class PcrSynchronizer final : public PacketSink,
 
   void HandlePmt(const ts::BinaryTable& table) {
     ts::PMT pmt(context_, table);
-    if (auto r = ValidatePmt(pmt); r != TableValidateResult::kOk) {
+    if (auto r = ValidatePcrSynchronizerPmt(pmt); r != TableValidateResult::kOk) {
       LogValidateError("pcr-synchronizer", r, table);
       return;
     }
@@ -212,9 +240,7 @@ class PcrSynchronizer final : public PacketSink,
 
     MIRAKC_ARIB_DEBUG("PCR#{:04X} for SID#{:04X}", pmt.pcr_pid, pmt.service_id);
     pcr_pid_map_[pmt.service_id] = pmt.pcr_pid;
-    if (pmt.pcr_pid != ts::PID_NULL) {
-      pcr_pids_.insert(pmt.pcr_pid);
-    }
+    pcr_pids_.insert(pmt.pcr_pid);
 
     if (pcr_pid_map_.size() == pmt_count_) {
       demux_.addPID(ts::PID_TOT);
