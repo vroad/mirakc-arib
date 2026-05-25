@@ -21,6 +21,7 @@
 #include <limits>
 #include <memory>
 #include <queue>
+#include <string>
 
 #include <gmock/gmock.h>
 #include <tsduck/tsduck.h>
@@ -128,6 +129,23 @@ class MockRingSink final : public PacketRingSink {
   PacketRingObserver* observer_ = nullptr;
 };
 
+inline ts::BinaryTable MakeTable(ts::DuckContext& context, const ts::xml::Element* node) {
+  ts::PID pid;
+  node->getIntAttribute<ts::PID>(pid, u"test-pid", true, 0, 0x0000, 0x1FFF);
+
+  ts::BinaryTable table;
+  table.fromXML(context, node);
+  table.setSourcePID(pid);
+  return table;
+}
+
+inline ts::BinaryTable MakeTable(ts::DuckContext& context, const std::string& xml) {
+  ts::xml::Document doc(CERR);
+  doc.parse(ts::UString::FromUTF8(xml));
+
+  return MakeTable(context, doc.rootElement()->firstChildElement());
+}
+
 class TableSource final : public PacketSource {
  public:
   TableSource() : section_file_(context_) {}
@@ -140,14 +158,9 @@ class TableSource final : public PacketSource {
     const auto* root = doc.rootElement();
     for (const auto* node = root->firstChildElement(); node != nullptr;
         node = node->nextSiblingElement()) {
-      ts::PID pid;
-      node->getIntAttribute<ts::PID>(pid, u"test-pid", true, 0, 0x0000, 0x1FFF);
+      const auto table = MakeTable(context_, node);
 
-      ts::BinaryTable table;
-      table.fromXML(context_, node);
-      table.setSourcePID(pid);
-
-      auto packetizer = std::make_unique<ts::CyclingPacketizer>(pid);
+      auto packetizer = std::make_unique<ts::CyclingPacketizer>(table.sourcePID());
       packetizer->addTable(table);
 
       ts::TSPacket packet;

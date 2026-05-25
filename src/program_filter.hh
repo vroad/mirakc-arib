@@ -31,6 +31,7 @@
 #include "logging.hh"
 #include "packet_sink.hh"
 #include "packet_source.hh"
+#include "table_validator.hh"
 #include "tsduck_helper.hh"
 
 #define MIRAKC_ARIB_PROGRAM_FILTER_TRACE(...) MIRAKC_ARIB_TRACE("program-filter: " __VA_ARGS__)
@@ -54,6 +55,14 @@ struct ProgramFilterOption final {
   std::optional<ts::Time> wait_until = std::nullopt;  // JST
   bool pre_streaming = false;                         // disabled
 };
+
+inline bool ValidateProgramFilterPat(const ts::PAT& pat, const ts::BinaryTable& table, uint16_t) {
+  return ValidatePat("program-filter", pat, table);
+}
+
+inline bool ValidateProgramFilterPmt(const ts::PMT& pmt) {
+  return ValidatePmt("program-filter", pmt);
+}
 
 class ProgramFilter final : public PacketSink, public ts::TableHandlerInterface {
  public:
@@ -282,36 +291,11 @@ class ProgramFilter final : public PacketSink, public ts::TableHandlerInterface 
   }
 
   void HandlePat(const ts::BinaryTable& table) {
-    // Ignore a strange PAT delivered with PID#0012 around midnight at least on
-    // BS-NTV and BS11 channels.
-    //
-    // This PAT has no PID of NIT and its ts_id is 0 like below:
-    //
-    //   * PAT, TID 0 (0x00), PID 18 (0x0012)
-    //     Short section, total size: 179 bytes
-    //     - Section 0:
-    //       TS id:       0 (0x0000)
-    //       Program: 19796 (0x4D54)  PID: 2672 (0x0A70)
-    //       Program: 28192 (0x6E20)  PID: 6205 (0x183D)
-    //       ...
-    //
-    if (table.sourcePID() != ts::PID_PAT) {
-      MIRAKC_ARIB_PROGRAM_FILTER_WARN("PAT delivered with PID#{:04X}, skip", table.sourcePID());
-      return;
-    }
-
     ts::PAT pat(context_, table);
 
-    if (!pat.isValid()) {
-      MIRAKC_ARIB_PROGRAM_FILTER_WARN("Broken PAT, skip");
+    if (!ValidateProgramFilterPat(pat, table, option_.sid)) {
       return;
     }
-
-    if (pat.ts_id == 0) {
-      MIRAKC_ARIB_PROGRAM_FILTER_WARN("PAT for TSID#0000, skip");
-      return;
-    }
-
     // The following condition is ensured by ServiceFilter.
     MIRAKC_ARIB_ASSERT(pat.pmts.find(option_.sid) != pat.pmts.end());
 
@@ -331,8 +315,7 @@ class ProgramFilter final : public PacketSink, public ts::TableHandlerInterface 
   void HandlePmt(const ts::BinaryTable& table) {
     ts::PMT pmt(context_, table);
 
-    if (!pmt.isValid()) {
-      MIRAKC_ARIB_PROGRAM_FILTER_WARN("Broken PMT, skip");
+    if (!ValidateProgramFilterPmt(pmt)) {
       return;
     }
 
@@ -433,8 +416,7 @@ class ProgramFilter final : public PacketSink, public ts::TableHandlerInterface 
   void HandleEit(const ts::BinaryTable& table) {
     ts::EIT eit(context_, table);
 
-    if (!eit.isValid()) {
-      MIRAKC_ARIB_PROGRAM_FILTER_WARN("Broken EIT, skip");
+    if (!ValidateEit("program-filter", eit)) {
       return;
     }
 
@@ -489,8 +471,7 @@ class ProgramFilter final : public PacketSink, public ts::TableHandlerInterface 
   void HandleTot(const ts::BinaryTable& table) {
     ts::TOT tot(context_, table);
 
-    if (!tot.isValid()) {
-      MIRAKC_ARIB_PROGRAM_FILTER_WARN("Broken TOT, skip");
+    if (!ValidateTot("program-filter", tot)) {
       return;
     }
 

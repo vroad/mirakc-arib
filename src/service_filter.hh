@@ -29,6 +29,7 @@
 #include "logging.hh"
 #include "packet_sink.hh"
 #include "packet_source.hh"
+#include "table_validator.hh"
 #include "tsduck_helper.hh"
 
 #define MIRAKC_ARIB_SERVICE_FILTER_TRACE(...) MIRAKC_ARIB_TRACE("service-filter: " __VA_ARGS__)
@@ -43,6 +44,18 @@ struct ServiceFilterOption final {
   uint16_t sid = 0;
   std::optional<ts::Time> time_limit = std::nullopt;  // JST
 };
+
+inline bool ValidateServiceFilterPat(const ts::PAT& pat, const ts::BinaryTable& table, uint16_t) {
+  return ValidatePat("service-filter", pat, table);
+}
+
+inline bool ValidateServiceFilterCat(ts::DuckContext&, const ts::CAT& cat) {
+  return ValidateCat("service-filter", cat);
+}
+
+inline bool ValidateServiceFilterPmt(ts::DuckContext&, const ts::PMT& pmt) {
+  return ValidatePmt("service-filter", pmt);
+}
 
 class ServiceFilter final : public PacketSink, public ts::TableHandlerInterface {
  public:
@@ -152,20 +165,9 @@ class ServiceFilter final : public PacketSink, public ts::TableHandlerInterface 
   }
 
   void HandlePat(const ts::BinaryTable& table) {
-    if (table.sourcePID() != ts::PID_PAT) {
-      MIRAKC_ARIB_SERVICE_FILTER_WARN("PAT delivered with PID#{:04X}, skip", table.sourcePID());
-      return;
-    }
-
     ts::PAT pat(context_, table);
 
-    if (!pat.isValid()) {
-      MIRAKC_ARIB_SERVICE_FILTER_WARN("Broken PAT, skip");
-      return;
-    }
-
-    if (pat.ts_id == 0) {
-      MIRAKC_ARIB_SERVICE_FILTER_WARN("PAT for TSID#0000, skip");
+    if (!ValidateServiceFilterPat(pat, table, option_.sid)) {
       return;
     }
 
@@ -228,8 +230,7 @@ class ServiceFilter final : public PacketSink, public ts::TableHandlerInterface 
   void HandleCat(const ts::BinaryTable& table) {
     ts::CAT cat(context_, table);
 
-    if (!cat.isValid()) {
-      MIRAKC_ARIB_SERVICE_FILTER_WARN("Broken CAT, skip");
+    if (!ValidateServiceFilterCat(context_, cat)) {
       return;
     }
 
@@ -248,8 +249,7 @@ class ServiceFilter final : public PacketSink, public ts::TableHandlerInterface 
   void HandlePmt(const ts::BinaryTable& table) {
     ts::PMT pmt(context_, table);
 
-    if (!pmt.isValid()) {
-      MIRAKC_ARIB_SERVICE_FILTER_WARN("Broken PMT, skip");
+    if (!ValidateServiceFilterPmt(context_, pmt)) {
       return;
     }
 
@@ -297,8 +297,7 @@ class ServiceFilter final : public PacketSink, public ts::TableHandlerInterface 
   void HandleTot(const ts::BinaryTable& table) {
     ts::TOT tot(context_, table);
 
-    if (!tot.isValid()) {
-      MIRAKC_ARIB_SERVICE_FILTER_WARN("Broken TOT, skip");
+    if (!ValidateTot("service-filter", tot)) {
       return;
     }
 

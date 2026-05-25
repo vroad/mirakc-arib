@@ -30,6 +30,7 @@
 #include "jsonl_source.hh"
 #include "logging.hh"
 #include "packet_source.hh"
+#include "table_validator.hh"
 #include "tsduck_helper.hh"
 
 #define MIRAKC_ARIB_PCR_SYNCHRONIZER_TRACE(...) MIRAKC_ARIB_TRACE("pcr-synchronizer: " __VA_ARGS__)
@@ -44,6 +45,14 @@ struct PcrSynchronizerOption final {
   SidSet sids;
   SidSet xsids;
 };
+
+inline bool ValidatePcrSynchronizerPat(const ts::PAT& pat, const ts::BinaryTable& table) {
+  return ValidatePat("pcr-synchronizer", pat, table);
+}
+
+inline bool ValidatePcrSynchronizerPmt(const ts::PMT& pmt) {
+  return ValidatePmt("pcr-synchronizer", pmt);
+}
 
 class PcrSynchronizer final : public PacketSink,
                               public JsonlSource,
@@ -144,20 +153,9 @@ class PcrSynchronizer final : public PacketSink,
   }
 
   void HandlePat(const ts::BinaryTable& table) {
-    if (table.sourcePID() != ts::PID_PAT) {
-      MIRAKC_ARIB_PCR_SYNCHRONIZER_WARN("PAT delivered with PID#{:04X}, skip", table.sourcePID());
-      return;
-    }
-
     ts::PAT pat(context_, table);
 
-    if (!pat.isValid()) {
-      MIRAKC_ARIB_PCR_SYNCHRONIZER_WARN("Broken PAT, skip");
-      return;
-    }
-
-    if (pat.ts_id == 0) {
-      MIRAKC_ARIB_PCR_SYNCHRONIZER_WARN("PAT for TSID#0000, skip");
+    if (!ValidatePcrSynchronizerPat(pat, table)) {
       return;
     }
 
@@ -191,11 +189,9 @@ class PcrSynchronizer final : public PacketSink,
   void HandleSdt(const ts::BinaryTable& table) {
     ts::SDT sdt(context_, table);
 
-    if (!sdt.isValid()) {
-      MIRAKC_ARIB_PCR_SYNCHRONIZER_WARN("Broken SDT, skip");
+    if (!ValidateSdt("pcr-synchronizer", sdt)) {
       return;
     }
-
     nid_ = sdt.onetw_id;
     tsid_ = sdt.ts_id;
 
@@ -218,11 +214,9 @@ class PcrSynchronizer final : public PacketSink,
   void HandlePmt(const ts::BinaryTable& table) {
     ts::PMT pmt(context_, table);
 
-    if (!pmt.isValid()) {
-      MIRAKC_ARIB_PCR_SYNCHRONIZER_WARN("Broken PMT, skip");
+    if (!ValidatePcrSynchronizerPmt(pmt)) {
       return;
     }
-
     auto it = pmt_pids_.find(pmt.service_id);
     if (it == pmt_pids_.end()) {
       MIRAKC_ARIB_PCR_SYNCHRONIZER_WARN("PMT.SID#{} unmatched, skip", pmt.service_id);
@@ -248,11 +242,9 @@ class PcrSynchronizer final : public PacketSink,
   void HandleTot(const ts::BinaryTable& table) {
     ts::TOT tot(context_, table);
 
-    if (!tot.isValid()) {
-      MIRAKC_ARIB_PCR_SYNCHRONIZER_WARN("Broken TOT, skip");
+    if (!ValidateTot("pcr-synchronizer", tot)) {
       return;
     }
-
     HandleTime(tot.utc_time);  // JST in ARIB
   }
 

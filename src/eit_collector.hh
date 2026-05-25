@@ -33,6 +33,7 @@
 #include "jsonl_source.hh"
 #include "logging.hh"
 #include "packet_source.hh"
+#include "table_validator.hh"
 #include "tsduck_helper.hh"
 
 namespace {
@@ -551,8 +552,7 @@ class EitCollector final : public PacketSink,
   inline void HandleTot(const ts::BinaryTable& table) {
     ts::TOT tot(context_, table);
 
-    if (!tot.isValid()) {
-      MIRAKC_ARIB_WARN("Broken TOT, skip");
+    if (!ValidateTot("eit-collector", tot)) {
       return;
     }
 

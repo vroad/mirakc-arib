@@ -29,6 +29,7 @@
 #include "jsonl_source.hh"
 #include "logging.hh"
 #include "packet_sink.hh"
+#include "table_validator.hh"
 #include "tsduck_helper.hh"
 
 #define MIRAKC_ARIB_SERVICE_RECORDER_TRACE(...) MIRAKC_ARIB_TRACE("service-recorder: " __VA_ARGS__)
@@ -46,6 +47,15 @@ struct ServiceRecorderOption final {
   size_t num_chunks = 0;
   uint64_t start_pos = 0;
 };
+
+inline bool ValidateServiceRecorderPat(
+    const ts::PAT& pat, const ts::BinaryTable& table, uint16_t) {
+  return ValidatePat("service-recorder", pat, table);
+}
+
+inline bool ValidateServiceRecorderPmt(const ts::PMT& pmt) {
+  return ValidatePmt("service-recorder", pmt);
+}
 
 class ServiceRecorder final : public PacketSink,
                               public JsonlSource,
@@ -162,24 +172,11 @@ class ServiceRecorder final : public PacketSink,
   }
 
   void HandlePat(const ts::BinaryTable& table) {
-    // See comments in ProgramFiler::HandlePat().
-    if (table.sourcePID() != ts::PID_PAT) {
-      MIRAKC_ARIB_SERVICE_RECORDER_WARN("PAT: PID#{:04X}, skip", table.sourcePID());
-      return;
-    }
-
     ts::PAT pat(context_, table);
 
-    if (!pat.isValid()) {
-      MIRAKC_ARIB_SERVICE_RECORDER_WARN("PAT: Broken, skip");
+    if (!ValidateServiceRecorderPat(pat, table, option_.sid)) {
       return;
     }
-
-    if (pat.ts_id == 0) {
-      MIRAKC_ARIB_SERVICE_RECORDER_WARN("PAT: TSID#0000, skip");
-      return;
-    }
-
     // The following condition is ensured by ServiceFilter.
     MIRAKC_ARIB_ASSERT(pat.pmts.find(option_.sid) != pat.pmts.end());
 
@@ -199,11 +196,9 @@ class ServiceRecorder final : public PacketSink,
   void HandlePmt(const ts::BinaryTable& table) {
     ts::PMT pmt(context_, table);
 
-    if (!pmt.isValid()) {
-      MIRAKC_ARIB_SERVICE_RECORDER_WARN("PMT: Broken, skip");
+    if (!ValidateServiceRecorderPmt(pmt)) {
       return;
     }
-
     if (pmt.service_id != option_.sid) {
       MIRAKC_ARIB_SERVICE_RECORDER_WARN("PMT: SID#{} not matched, skip", pmt.service_id);
       return;
@@ -221,10 +216,9 @@ class ServiceRecorder final : public PacketSink,
   }
 
   void HandleEit(const ts::BinaryTable& table) {
-    std::shared_ptr<ts::EIT> eit(new ts::EIT(context_, table));
+    auto eit = std::make_shared<ts::EIT>(context_, table);
 
-    if (!eit->isValid()) {
-      MIRAKC_ARIB_SERVICE_RECORDER_WARN("EIT[p/f]: Broken, skip");
+    if (!ValidateEit("service-recorder", *eit)) {
       return;
     }
 
@@ -258,8 +252,8 @@ class ServiceRecorder final : public PacketSink,
 
   void HandleTot(const ts::BinaryTable& table) {
     ts::TOT tot(context_, table);
-    if (!tot.isValid()) {
-      MIRAKC_ARIB_SERVICE_RECORDER_WARN("TOT: Broken, skip");
+
+    if (!ValidateTot("service-recorder", tot)) {
       return;
     }
     clock_.UpdateTime(tot.utc_time);  // JST in ARIB

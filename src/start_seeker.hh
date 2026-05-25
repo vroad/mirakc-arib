@@ -27,6 +27,7 @@
 #include "logging.hh"
 #include "packet_sink.hh"
 #include "packet_source.hh"
+#include "table_validator.hh"
 #include "tsduck_helper.hh"
 
 namespace {
@@ -36,6 +37,14 @@ struct StartSeekerOption final {
   ts::MilliSecond max_duration = 0;
   uint32_t max_packets = 0;
 };
+
+inline bool ValidateStartSeekerPat(const ts::PAT& pat, const ts::BinaryTable& table, uint16_t) {
+  return ValidatePat("start-seeker", pat, table);
+}
+
+inline bool ValidateStartSeekerPmt(const ts::PMT& pmt) {
+  return ValidatePmt("start-seeker", pmt);
+}
 
 class StartSeeker final : public PacketSink, public ts::TableHandlerInterface {
  public:
@@ -179,20 +188,9 @@ class StartSeeker final : public PacketSink, public ts::TableHandlerInterface {
   }
 
   void HandlePat(const ts::BinaryTable& table) {
-    if (table.sourcePID() != ts::PID_PAT) {
-      MIRAKC_ARIB_WARN("PAT delivered with PID#{:04X}, skip", table.sourcePID());
-      return;
-    }
-
     ts::PAT pat(context_, table);
 
-    if (!pat.isValid()) {
-      MIRAKC_ARIB_WARN("Broken PAT, skip");
-      return;
-    }
-
-    if (pat.ts_id == 0) {
-      MIRAKC_ARIB_WARN("PAT for TSID#0000, skip");
+    if (!ValidateStartSeekerPat(pat, table, option_.sid)) {
       return;
     }
 
@@ -219,8 +217,7 @@ class StartSeeker final : public PacketSink, public ts::TableHandlerInterface {
   void HandlePmt(const ts::BinaryTable& table) {
     ts::PMT pmt(context_, table);
 
-    if (!pmt.isValid()) {
-      MIRAKC_ARIB_WARN("Broken PMT, skip");
+    if (!ValidateStartSeekerPmt(pmt)) {
       return;
     }
 
