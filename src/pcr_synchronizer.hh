@@ -32,6 +32,12 @@
 #include "packet_source.hh"
 #include "tsduck_helper.hh"
 
+#define MIRAKC_ARIB_PCR_SYNCHRONIZER_TRACE(...) MIRAKC_ARIB_TRACE("pcr-synchronizer: " __VA_ARGS__)
+#define MIRAKC_ARIB_PCR_SYNCHRONIZER_DEBUG(...) MIRAKC_ARIB_DEBUG("pcr-synchronizer: " __VA_ARGS__)
+#define MIRAKC_ARIB_PCR_SYNCHRONIZER_INFO(...) MIRAKC_ARIB_INFO("pcr-synchronizer: " __VA_ARGS__)
+#define MIRAKC_ARIB_PCR_SYNCHRONIZER_WARN(...) MIRAKC_ARIB_WARN("pcr-synchronizer: " __VA_ARGS__)
+#define MIRAKC_ARIB_PCR_SYNCHRONIZER_ERROR(...) MIRAKC_ARIB_ERROR("pcr-synchronizer: " __VA_ARGS__)
+
 namespace {
 
 struct PcrSynchronizerOption final {
@@ -101,10 +107,10 @@ class PcrSynchronizer final : public PacketSink,
         if (!packet.hasPCR() || packet.getPCR() == ts::INVALID_PCR) {
           // Many PCR packets in a specific channel have no valid PCR...
           // See https://github.com/mirakc/mirakc-arib/issues/3
-          MIRAKC_ARIB_TRACE("PCR#{:04X} has no valid PCR...", pid);
+          MIRAKC_ARIB_PCR_SYNCHRONIZER_TRACE("PCR#{:04X} has no valid PCR...", pid);
         } else {
           auto pcr = static_cast<int64_t>(packet.getPCR());
-          MIRAKC_ARIB_INFO("PCR#{:04X}: {}", pid, FormatPcr(pcr));
+          MIRAKC_ARIB_PCR_SYNCHRONIZER_INFO("PCR#{:04X}: {}", pid, FormatPcr(pcr));
           pcr_map_[pid] = pcr;
           if (pcr_map_.size() == pcr_pids_.size()) {
             done_ = true;
@@ -139,19 +145,19 @@ class PcrSynchronizer final : public PacketSink,
 
   void HandlePat(const ts::BinaryTable& table) {
     if (table.sourcePID() != ts::PID_PAT) {
-      MIRAKC_ARIB_WARN("PAT delivered with PID#{:04X}, skip", table.sourcePID());
+      MIRAKC_ARIB_PCR_SYNCHRONIZER_WARN("PAT delivered with PID#{:04X}, skip", table.sourcePID());
       return;
     }
 
     ts::PAT pat(context_, table);
 
     if (!pat.isValid()) {
-      MIRAKC_ARIB_WARN("Broken PAT, skip");
+      MIRAKC_ARIB_PCR_SYNCHRONIZER_WARN("Broken PAT, skip");
       return;
     }
 
     if (pat.ts_id == 0) {
-      MIRAKC_ARIB_WARN("PAT for TSID#0000, skip");
+      MIRAKC_ARIB_PCR_SYNCHRONIZER_WARN("PAT for TSID#0000, skip");
       return;
     }
 
@@ -161,11 +167,13 @@ class PcrSynchronizer final : public PacketSink,
 
     for (const auto& [sid, pmt_pid] : pat.pmts) {
       if (!option_.sids.IsEmpty() && !option_.sids.Contain(sid)) {
-        MIRAKC_ARIB_DEBUG("Ignore SID#{:04X} according to the inclusion list", sid);
+        MIRAKC_ARIB_PCR_SYNCHRONIZER_DEBUG(
+            "Ignore SID#{:04X} according to the inclusion list", sid);
         continue;
       }
       if (!option_.xsids.IsEmpty() && option_.xsids.Contain(sid)) {
-        MIRAKC_ARIB_DEBUG("Ignore SID#{:04X} according to the exclusion list", sid);
+        MIRAKC_ARIB_PCR_SYNCHRONIZER_DEBUG(
+            "Ignore SID#{:04X} according to the exclusion list", sid);
         continue;
       }
       pmt_pids_[sid] = pmt_pid;
@@ -173,18 +181,18 @@ class PcrSynchronizer final : public PacketSink,
 
     if (pmt_pids_.empty()) {
       done_ = true;
-      MIRAKC_ARIB_WARN("No service defined in PAT, done");
+      MIRAKC_ARIB_PCR_SYNCHRONIZER_WARN("No service defined in PAT, done");
     }
 
     demux_.addPID(ts::PID_SDT);
-    MIRAKC_ARIB_DEBUG("Demux SDT");
+    MIRAKC_ARIB_PCR_SYNCHRONIZER_DEBUG("Demux SDT");
   }
 
   void HandleSdt(const ts::BinaryTable& table) {
     ts::SDT sdt(context_, table);
 
     if (!sdt.isValid()) {
-      MIRAKC_ARIB_WARN("Broken SDT, skip");
+      MIRAKC_ARIB_PCR_SYNCHRONIZER_WARN("Broken SDT, skip");
       return;
     }
 
@@ -202,7 +210,7 @@ class PcrSynchronizer final : public PacketSink,
       }
       ++pmt_count_;
       demux_.addPID(pid);
-      MIRAKC_ARIB_DEBUG(
+      MIRAKC_ARIB_PCR_SYNCHRONIZER_DEBUG(
           "Demux PMT#{:04X} for SID#{:04X} ServiceType({:02X})", pid, sid, service_type);
     }
   }
@@ -211,21 +219,21 @@ class PcrSynchronizer final : public PacketSink,
     ts::PMT pmt(context_, table);
 
     if (!pmt.isValid()) {
-      MIRAKC_ARIB_WARN("Broken PMT, skip");
+      MIRAKC_ARIB_PCR_SYNCHRONIZER_WARN("Broken PMT, skip");
       return;
     }
 
     auto it = pmt_pids_.find(pmt.service_id);
     if (it == pmt_pids_.end()) {
-      MIRAKC_ARIB_WARN("PMT.SID#{} unmatched, skip", pmt.service_id);
+      MIRAKC_ARIB_PCR_SYNCHRONIZER_WARN("PMT.SID#{} unmatched, skip", pmt.service_id);
       return;
     }
     if (it->second != table.sourcePID()) {
-      MIRAKC_ARIB_WARN("PMT.PID#{} unmatched, skip", table.sourcePID());
+      MIRAKC_ARIB_PCR_SYNCHRONIZER_WARN("PMT.PID#{} unmatched, skip", table.sourcePID());
       return;
     }
 
-    MIRAKC_ARIB_DEBUG("PCR#{:04X} for SID#{:04X}", pmt.pcr_pid, pmt.service_id);
+    MIRAKC_ARIB_PCR_SYNCHRONIZER_DEBUG("PCR#{:04X} for SID#{:04X}", pmt.pcr_pid, pmt.service_id);
     pcr_pid_map_[pmt.service_id] = pmt.pcr_pid;
     if (pmt.pcr_pid != ts::PID_NULL) {
       pcr_pids_.insert(pmt.pcr_pid);
@@ -233,7 +241,7 @@ class PcrSynchronizer final : public PacketSink,
 
     if (pcr_pid_map_.size() == pmt_count_) {
       demux_.addPID(ts::PID_TOT);
-      MIRAKC_ARIB_DEBUG("Demux TOT");
+      MIRAKC_ARIB_PCR_SYNCHRONIZER_DEBUG("Demux TOT");
     }
   }
 
@@ -241,7 +249,7 @@ class PcrSynchronizer final : public PacketSink,
     ts::TOT tot(context_, table);
 
     if (!tot.isValid()) {
-      MIRAKC_ARIB_WARN("Broken TOT, skip");
+      MIRAKC_ARIB_PCR_SYNCHRONIZER_WARN("Broken TOT, skip");
       return;
     }
 
@@ -249,14 +257,14 @@ class PcrSynchronizer final : public PacketSink,
   }
 
   void HandleTime(const ts::Time& time) {
-    MIRAKC_ARIB_INFO("Time: {}", time);
+    MIRAKC_ARIB_PCR_SYNCHRONIZER_INFO("Time: {}", time);
     time_ = time;
 
     started_ = true;
   }
 
   void ResetStates() {
-    MIRAKC_ARIB_INFO("Reset states");
+    MIRAKC_ARIB_PCR_SYNCHRONIZER_INFO("Reset states");
 
     demux_.removePID(ts::PID_TOT);
     for (const auto& pair : pmt_pids_) {
