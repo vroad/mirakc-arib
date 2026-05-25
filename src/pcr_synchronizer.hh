@@ -46,12 +46,41 @@ struct PcrSynchronizerOption final {
   SidSet xsids;
 };
 
+inline bool IsPcrSynchronizerTargetService(const PcrSynchronizerOption& option, uint16_t sid) {
+  if (!option.sids.IsEmpty() && !option.sids.Contain(sid)) {
+    return false;
+  }
+
+  if (!option.xsids.IsEmpty() && option.xsids.Contain(sid)) {
+    return false;
+  }
+
+  return true;
+}
+
 inline bool ValidatePcrSynchronizerPat(const ts::PAT& pat, const ts::BinaryTable& table) {
   return ValidatePat("pcr-synchronizer", pat, table);
 }
 
+inline bool ValidatePcrSynchronizerPatPmtPids(
+    const ts::PAT& pat, const PcrSynchronizerOption& option) {
+  for (const auto& [sid, pmt_pid] : pat.pmts) {
+    if (IsPcrSynchronizerTargetService(option, sid) && !IsAssignablePid(pmt_pid)) {
+      MIRAKC_ARIB_PCR_SYNCHRONIZER_WARN(
+          "PAT has invalid PMT PID#{:04X} for SID#{:04X}, skip", pmt_pid, sid);
+      return false;
+    }
+  }
+
+  return true;
+}
+
 inline bool ValidatePcrSynchronizerPmt(const ts::PMT& pmt) {
-  return ValidatePmt("pcr-synchronizer", pmt);
+  if (!ValidatePmt("pcr-synchronizer", pmt)) {
+    return false;
+  }
+
+  return ValidatePmtPcrPid("pcr-synchronizer", pmt);
 }
 
 class PcrSynchronizer final : public PacketSink,
@@ -159,19 +188,26 @@ class PcrSynchronizer final : public PacketSink,
       return;
     }
 
+    if (!ValidatePcrSynchronizerPatPmtPids(pat, option_)) {
+      if (!pmt_pids_.empty()) {
+        ResetStates();
+      }
+      return;
+    }
+
     if (!pmt_pids_.empty()) {
       ResetStates();
     }
 
     for (const auto& [sid, pmt_pid] : pat.pmts) {
-      if (!option_.sids.IsEmpty() && !option_.sids.Contain(sid)) {
-        MIRAKC_ARIB_PCR_SYNCHRONIZER_DEBUG(
-            "Ignore SID#{:04X} according to the inclusion list", sid);
-        continue;
-      }
-      if (!option_.xsids.IsEmpty() && option_.xsids.Contain(sid)) {
-        MIRAKC_ARIB_PCR_SYNCHRONIZER_DEBUG(
-            "Ignore SID#{:04X} according to the exclusion list", sid);
+      if (!IsPcrSynchronizerTargetService(option_, sid)) {
+        if (!option_.sids.IsEmpty() && !option_.sids.Contain(sid)) {
+          MIRAKC_ARIB_PCR_SYNCHRONIZER_DEBUG(
+              "Ignore SID#{:04X} according to the inclusion list", sid);
+        } else {
+          MIRAKC_ARIB_PCR_SYNCHRONIZER_DEBUG(
+              "Ignore SID#{:04X} according to the exclusion list", sid);
+        }
         continue;
       }
       pmt_pids_[sid] = pmt_pid;
@@ -229,9 +265,7 @@ class PcrSynchronizer final : public PacketSink,
 
     MIRAKC_ARIB_PCR_SYNCHRONIZER_DEBUG("PCR#{:04X} for SID#{:04X}", pmt.pcr_pid, pmt.service_id);
     pcr_pid_map_[pmt.service_id] = pmt.pcr_pid;
-    if (pmt.pcr_pid != ts::PID_NULL) {
-      pcr_pids_.insert(pmt.pcr_pid);
-    }
+    pcr_pids_.insert(pmt.pcr_pid);
 
     if (pcr_pid_map_.size() == pmt_count_) {
       demux_.addPID(ts::PID_TOT);

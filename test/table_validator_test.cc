@@ -49,6 +49,23 @@ TEST(TableValidatorTest, ValidPat) {
   EXPECT_TRUE(ValidatePat(kTestLogTag, pat, table));
 }
 
+TEST(TableValidatorTest, PatPmtPidReturnsOkForMissingServiceId) {
+  ts::DuckContext context;
+
+  auto table = MakeTable(context, R"(
+    <?xml version="1.0" encoding="utf-8"?>
+    <tsduck>
+      <PAT version="1" current="true" transport_stream_id="0x1234" test-pid="0x0000">
+        <service service_id="0x0001" program_map_PID="0x0101"/>
+      </PAT>
+    </tsduck>
+  )");
+  ts::PAT pat(context, table);
+
+  EXPECT_TRUE(ValidatePat(kTestLogTag, pat, table));
+  EXPECT_TRUE(ValidatePatPmtPid(kTestLogTag, pat, 0x0002));
+}
+
 TEST(TableValidatorTest, PatWithWrongPid) {
   ts::DuckContext context;
 
@@ -96,6 +113,7 @@ TEST(TableValidatorTest, ValidCat) {
   ts::CAT cat(context, table);
 
   EXPECT_TRUE(ValidateCat(kTestLogTag, cat));
+  EXPECT_TRUE(ValidateCatCaPids(kTestLogTag, context, cat));
 }
 
 TEST(TableValidatorTest, ValidCatWithoutCaDescriptors) {
@@ -110,6 +128,7 @@ TEST(TableValidatorTest, ValidCatWithoutCaDescriptors) {
   ts::CAT cat(context, table);
 
   EXPECT_TRUE(ValidateCat(kTestLogTag, cat));
+  EXPECT_TRUE(ValidateCatCaPids(kTestLogTag, context, cat));
 }
 
 TEST(TableValidatorTest, ValidPmt) {
@@ -126,6 +145,9 @@ TEST(TableValidatorTest, ValidPmt) {
   ts::PMT pmt(context, table);
 
   EXPECT_TRUE(ValidatePmt(kTestLogTag, pmt));
+  EXPECT_TRUE(ValidatePmtPcrPid(kTestLogTag, pmt));
+  EXPECT_TRUE(ValidatePmtProgramCaPids(kTestLogTag, context, pmt));
+  EXPECT_TRUE(ValidatePmtStreamPids(kTestLogTag, pmt));
 }
 
 TEST(TableValidatorTest, ValidTot) {
@@ -293,4 +315,98 @@ TEST(TableValidatorTest, BrokenTables) {
 
     EXPECT_FALSE(result);
   }
+}
+
+TEST(TableValidatorTest, AssignablePidBounds) {
+  EXPECT_FALSE(IsAssignablePid(0x002F));
+  EXPECT_TRUE(IsAssignablePid(0x0030));
+  EXPECT_TRUE(IsAssignablePid(0x1FFE));
+  EXPECT_FALSE(IsAssignablePid(0x1FFF));
+}
+
+TEST(TableValidatorTest, PatWithInvalidIndirectPmtPid) {
+  ts::DuckContext context;
+
+  auto table = MakeTable(context, R"(
+    <?xml version="1.0" encoding="utf-8"?>
+    <tsduck>
+      <PAT version="1" current="true" transport_stream_id="0x1234" test-pid="0x0000">
+        <service service_id="0x0001" program_map_PID="0x1FFF"/>
+      </PAT>
+    </tsduck>
+  )");
+  ts::PAT pat(context, table);
+
+  EXPECT_TRUE(ValidatePat(kTestLogTag, pat, table));
+  EXPECT_FALSE(ValidatePatPmtPid(kTestLogTag, pat, 0x0001));
+  EXPECT_FALSE(ValidatePatPmtPids(kTestLogTag, pat));
+}
+
+TEST(TableValidatorTest, CatWithInvalidIndirectCaPid) {
+  ts::DuckContext context;
+
+  auto table = MakeTable(context, R"(
+    <?xml version="1.0" encoding="utf-8"?>
+    <tsduck>
+      <CAT version="1" current="true" test-pid="0x0001">
+        <CA_descriptor CA_system_id="0x0005" CA_PID="0x1FFF"/>
+      </CAT>
+    </tsduck>
+  )");
+  ts::CAT cat(context, table);
+
+  EXPECT_TRUE(ValidateCat(kTestLogTag, cat));
+  EXPECT_FALSE(ValidateCatCaPids(kTestLogTag, context, cat));
+}
+
+TEST(TableValidatorTest, PmtWithInvalidIndirectPcrPid) {
+  ts::DuckContext context;
+
+  auto table = MakeTable(context, R"(
+    <?xml version="1.0" encoding="utf-8"?>
+    <tsduck>
+      <PMT version="1" current="true" service_id="0x0001" PCR_PID="0x1FFF" test-pid="0x0101">
+        <component elementary_PID="0x0301" stream_type="0x02"/>
+      </PMT>
+    </tsduck>
+  )");
+  ts::PMT pmt(context, table);
+
+  EXPECT_TRUE(ValidatePmt(kTestLogTag, pmt));
+  EXPECT_FALSE(ValidatePmtPcrPid(kTestLogTag, pmt));
+}
+
+TEST(TableValidatorTest, PmtWithInvalidIndirectStreamPid) {
+  ts::DuckContext context;
+
+  auto table = MakeTable(context, R"(
+    <?xml version="1.0" encoding="utf-8"?>
+    <tsduck>
+      <PMT version="1" current="true" service_id="0x0001" PCR_PID="0x0901" test-pid="0x0101">
+        <component elementary_PID="0x1FFF" stream_type="0x02"/>
+      </PMT>
+    </tsduck>
+  )");
+  ts::PMT pmt(context, table);
+
+  EXPECT_TRUE(ValidatePmt(kTestLogTag, pmt));
+  EXPECT_FALSE(ValidatePmtStreamPids(kTestLogTag, pmt));
+}
+
+TEST(TableValidatorTest, PmtWithInvalidIndirectProgramCaPid) {
+  ts::DuckContext context;
+
+  auto table = MakeTable(context, R"(
+    <?xml version="1.0" encoding="utf-8"?>
+    <tsduck>
+      <PMT version="1" current="true" service_id="0x0001" PCR_PID="0x0901" test-pid="0x0101">
+        <CA_descriptor CA_system_id="0x0005" CA_PID="0x1FFF"/>
+        <component elementary_PID="0x0301" stream_type="0x02"/>
+      </PMT>
+    </tsduck>
+  )");
+  ts::PMT pmt(context, table);
+
+  EXPECT_TRUE(ValidatePmt(kTestLogTag, pmt));
+  EXPECT_FALSE(ValidatePmtProgramCaPids(kTestLogTag, context, pmt));
 }

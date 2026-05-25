@@ -38,12 +38,25 @@ struct StartSeekerOption final {
   uint32_t max_packets = 0;
 };
 
-inline bool ValidateStartSeekerPat(const ts::PAT& pat, const ts::BinaryTable& table, uint16_t) {
-  return ValidatePat("start-seeker", pat, table);
+inline bool ValidateStartSeekerPat(
+    const ts::PAT& pat, const ts::BinaryTable& table, uint16_t sid) {
+  if (!ValidatePat("start-seeker", pat, table)) {
+    return false;
+  }
+
+  return ValidatePatPmtPid("start-seeker", pat, sid);
 }
 
 inline bool ValidateStartSeekerPmt(const ts::PMT& pmt) {
-  return ValidatePmt("start-seeker", pmt);
+  if (!ValidatePmt("start-seeker", pmt)) {
+    return false;
+  }
+
+  if (!ValidatePmtPcrPid("start-seeker", pmt)) {
+    return false;
+  }
+
+  return ValidatePmtStreamPids("start-seeker", pmt);
 }
 
 class StartSeeker final : public PacketSink, public ts::TableHandlerInterface {

@@ -45,16 +45,37 @@ struct ServiceFilterOption final {
   std::optional<ts::Time> time_limit = std::nullopt;  // JST
 };
 
-inline bool ValidateServiceFilterPat(const ts::PAT& pat, const ts::BinaryTable& table, uint16_t) {
-  return ValidatePat("service-filter", pat, table);
+inline bool ValidateServiceFilterPat(
+    const ts::PAT& pat, const ts::BinaryTable& table, uint16_t sid) {
+  if (!ValidatePat("service-filter", pat, table)) {
+    return false;
+  }
+
+  return ValidatePatPmtPid("service-filter", pat, sid);
 }
 
-inline bool ValidateServiceFilterCat(ts::DuckContext&, const ts::CAT& cat) {
-  return ValidateCat("service-filter", cat);
+inline bool ValidateServiceFilterCat(ts::DuckContext& context, const ts::CAT& cat) {
+  if (!ValidateCat("service-filter", cat)) {
+    return false;
+  }
+
+  return ValidateCatCaPids("service-filter", context, cat);
 }
 
-inline bool ValidateServiceFilterPmt(ts::DuckContext&, const ts::PMT& pmt) {
-  return ValidatePmt("service-filter", pmt);
+inline bool ValidateServiceFilterPmt(ts::DuckContext& context, const ts::PMT& pmt) {
+  if (!ValidatePmt("service-filter", pmt)) {
+    return false;
+  }
+
+  if (!ValidatePmtPcrPid("service-filter", pmt)) {
+    return false;
+  }
+
+  if (!ValidatePmtProgramCaPids("service-filter", context, pmt)) {
+    return false;
+  }
+
+  return ValidatePmtStreamPids("service-filter", pmt);
 }
 
 class ServiceFilter final : public PacketSink, public ts::TableHandlerInterface {

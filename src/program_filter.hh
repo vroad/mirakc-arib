@@ -56,12 +56,25 @@ struct ProgramFilterOption final {
   bool pre_streaming = false;                         // disabled
 };
 
-inline bool ValidateProgramFilterPat(const ts::PAT& pat, const ts::BinaryTable& table, uint16_t) {
-  return ValidatePat("program-filter", pat, table);
+inline bool ValidateProgramFilterPat(
+    const ts::PAT& pat, const ts::BinaryTable& table, uint16_t sid) {
+  if (!ValidatePat("program-filter", pat, table)) {
+    return false;
+  }
+
+  return ValidatePatPmtPid("program-filter", pat, sid);
 }
 
 inline bool ValidateProgramFilterPmt(const ts::PMT& pmt) {
-  return ValidatePmt("program-filter", pmt);
+  if (!ValidatePmt("program-filter", pmt)) {
+    return false;
+  }
+
+  if (!ValidatePmtPcrPid("program-filter", pmt)) {
+    return false;
+  }
+
+  return ValidatePmtStreamPids("program-filter", pmt);
 }
 
 class ProgramFilter final : public PacketSink, public ts::TableHandlerInterface {

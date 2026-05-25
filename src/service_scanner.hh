@@ -41,7 +41,11 @@ struct ServiceScannerOption final {
 };
 
 inline bool ValidateServiceScannerPat(const ts::PAT& pat, const ts::BinaryTable& table) {
-  return ValidatePat("service-scanner", pat, table);
+  if (!ValidatePat("service-scanner", pat, table)) {
+    return false;
+  }
+
+  return ValidatePatPmtPids("service-scanner", pat);
 }
 
 // The implementation is based on tsTSScanner.cpp.  Unlike the ts::TSScanner
