@@ -801,6 +801,7 @@ add_executable(mirakc-arib
   src/program_filter.hh
   src/program_metadata_filter.hh
   src/ring_file_sink.hh
+  src/service_event_collector.hh
   src/service_filter.hh
   src/service_recorder.hh
   src/service_scanner.hh
@@ -872,6 +873,7 @@ if(MIRAKC_ARIB_TEST)
     test/pcr_synchronizer_test.cc
     test/program_filter_test.cc
     test/ring_file_sink_test.cc
+    test/service_event_collector_test.cc
     test/service_filter_test.cc
     test/service_recorder_test.cc
     test/service_scanner_test.cc

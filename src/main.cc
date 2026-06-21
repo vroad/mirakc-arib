@@ -45,6 +45,7 @@
 #include "program_filter.hh"
 #include "program_metadata_filter.hh"
 #include "ring_file_sink.hh"
+#include "service_event_collector.hh"
 #include "service_filter.hh"
 #include "service_recorder.hh"
 #include "service_scanner.hh"
@@ -70,6 +71,7 @@ Tools to process ARIB TS streams.
 Usage:
   mirakc-arib (-h | --help)
     [(scan-services | sync-clocks | collect-eits | collect-eitpf | collect-logos |
+      collect-service-events |
       filter-service | filter-program | filter-program-metadata |
       record-service | track-airtime | seek-start | print-pes)]
   mirakc-arib --version
@@ -82,6 +84,7 @@ Usage:
   mirakc-arib collect-eitpf [--sids=<sid>...]
                             [--streaming] [(--present | --following)] [<file>]
   mirakc-arib collect-logos [<file>]
+  mirakc-arib collect-service-events --sid=<sid> [<file>]
   mirakc-arib filter-service --sid=<sid> [<file>]
   mirakc-arib filter-program --sid=<sid> --eid=<eid>
     --clock-pid=<pid> --clock-pcr=<pcr> --clock-time=<unix-time-ms>
@@ -459,6 +462,44 @@ Description:
 
   You can collect logos from a TS files recorded using `filter-service` or
   `filter-program` if it contains CDT sections and/or logo data modules.
+)";
+
+static const std::string kCollectServiceEvents = "collect-service-events";
+
+static const std::string kCollectServiceEventsHelp = R"(
+Collect service-level events as JSONL
+
+Usage:
+  mirakc-arib collect-service-events --sid=<sid> [<file>]
+
+Options:
+  -h --help
+    Print help.
+
+  --sid=<sid>
+    Service ID.
+
+Arguments:
+  <file>
+    Path to a TS file.
+
+Description:
+  `collect-service-events` reuses `filter-service` to isolate the target
+  service, then emits service-level metadata events (EIT sections, TOT/PCR
+  clock events, and raw ARIB caption / superimposed-text PES payloads) as
+  newline-delimited JSON to STDOUT.
+
+  ARIB caption payloads are NOT decoded into text.  Caption / superimposed-text
+  PES packets are emitted as base64 with PTS/DTS timing.  Parsing the payload
+  is the responsibility of the JSONL consumer.
+
+  This subcommand is intended to be used from mirakc as a post-filter:
+
+    post-filters:
+      service-events:
+        command: >-
+          mirakc-arib collect-service-events --sid={{{sid}}}
+        content-type: application/x-ndjson
 )";
 
 static const std::string kFilterService = "filter-service";
@@ -1036,6 +1077,8 @@ void Init(const Args& args) {
     InitLogger(kCollectEitpf);
   } else if (args.at(kCollectLogos).asBool()) {
     InitLogger(kCollectLogos);
+  } else if (args.at(kCollectServiceEvents).asBool()) {
+    InitLogger(kCollectServiceEvents);
   } else if (args.at(kFilterService).asBool()) {
     InitLogger(kFilterService);
   } else if (args.at(kFilterProgram).asBool()) {
@@ -1346,6 +1389,19 @@ std::unique_ptr<PacketSink> MakePacketSink(const Args& args) {
     collector->Connect(std::move(std::make_unique<StdoutJsonlSink>()));
     return collector;
   }
+  if (args.at(kCollectServiceEvents).asBool()) {
+    ServiceEventCollectorOption collector_option;
+    collector_option.sid = static_cast<uint16_t>(args.at("--sid").asLong());
+    MIRAKC_ARIB_INFO("ServiceEventCollectorOptions: sid=#{:04X}", collector_option.sid);
+    auto collector = std::make_unique<ServiceEventCollector>(collector_option);
+    collector->Connect(std::make_unique<StdoutJsonlSink>());
+
+    ServiceFilterOption filter_option;
+    LoadOption(args, &filter_option);
+    auto filter = std::make_unique<ServiceFilter>(filter_option);
+    filter->Connect(std::move(collector));
+    return filter;
+  }
   if (args.at(kFilterService).asBool()) {
     ServiceFilterOption option;
     LoadOption(args, &option);
@@ -1417,6 +1473,8 @@ void ShowHelp(const Args& args) {
     fmt::print(kCollectEitpfHelp);
   } else if (args.at(kCollectLogos).asBool()) {
     fmt::print(kCollectLogosHelp);
+  } else if (args.at(kCollectServiceEvents).asBool()) {
+    fmt::print(kCollectServiceEventsHelp);
   } else if (args.at(kFilterService).asBool()) {
     fmt::print(kFilterServiceHelp);
   } else if (args.at(kFilterProgram).asBool()) {

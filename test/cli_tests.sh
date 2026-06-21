@@ -42,6 +42,7 @@ for opt in '-h' '--help'
 do
   assert 0 "$MIRAKC_ARIB $opt"
   for cmd in 'scan-services' 'sync-clocks' 'collect-eits' 'collect-logos' \
+             'collect-service-events' \
              'filter-service' 'filter-program' 'record-service' 'track-airtime' \
              'seek-start' 'print-pes'
   do
@@ -67,6 +68,9 @@ assert 0 "$MIRAKC_ARIB collect-eitpf --sids=1 --sids=0xFFFF --streaming"
 assert 0 "$MIRAKC_ARIB collect-eitpf --sids=1 --sids=0xFFFF --streaming --present"
 assert 0 "$MIRAKC_ARIB collect-eitpf --sids=1 --sids=0xFFFF --streaming --following"
 assert 255 "$MIRAKC_ARIB collect-eitpf --present --following"
+
+assert 0 "$MIRAKC_ARIB collect-service-events --sid=1"
+assert 0 "$MIRAKC_ARIB collect-service-events --sid=0xFFFF"
 
 assert 0 "$MIRAKC_ARIB filter-service --sid=1"
 assert 0 "$MIRAKC_ARIB filter-service --sid=0xFFFF"
